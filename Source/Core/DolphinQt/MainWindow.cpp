@@ -49,6 +49,8 @@
 #include "Core/Config/NetplaySettings.h"
 #include "Core/Config/UISettings.h"
 #include "Core/Config/WiimoteSettings.h"
+#include "Core/HW/SI/SI_Device.h"
+#include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/FreeLookManager.h"
 #include "Core/HW/DVD/DVDInterface.h"
@@ -563,7 +565,6 @@ void MainWindow::ConnectMenuBar()
   connect(m_menu_bar, &MenuBar::ConfigureControllers, this, &MainWindow::ShowControllersWindow);
   connect(m_menu_bar, &MenuBar::ConfigureHotkeys, this, &MainWindow::ShowHotkeyDialog);
   connect(m_menu_bar, &MenuBar::ConfigureFreelook, this, &MainWindow::ShowFreeLookWindow);
-
   // Tools
   connect(m_menu_bar, &MenuBar::ShowMemcardManager, this, &MainWindow::ShowMemcardManager);
   connect(m_menu_bar, &MenuBar::ShowResourcePackManager, this,
@@ -703,6 +704,7 @@ void MainWindow::ConnectToolBar()
   connect(m_tool_bar, &ToolBar::ScreenShotPressed, this, &MainWindow::ScreenShot);
   connect(m_tool_bar, &ToolBar::SettingsPressed, this, &MainWindow::ShowSettingsWindow);
   connect(m_tool_bar, &ToolBar::ControllersPressed, this, &MainWindow::ShowControllersWindow);
+  connect(m_tool_bar, &ToolBar::BindKeyPressed, this, &MainWindow::ShowBindKeyWindow);
   connect(m_tool_bar, &ToolBar::GraphicsPressed, this, &MainWindow::ShowGraphicsWindow);
 
   connect(m_tool_bar, &ToolBar::StepPressed, m_code_widget, &CodeWidget::Step);
@@ -1299,6 +1301,19 @@ void MainWindow::ShowFreeLookWindow()
   m_freelook_window->show();
   m_freelook_window->raise();
   m_freelook_window->activateWindow();
+}
+
+void MainWindow::ShowBindKeyWindow()
+{
+  Config::SetBaseOrCurrent(Config::GetInfoForSIDevice(0), SerialInterface::SIDEVICE_GC_CONTROLLER);
+  
+  // 保存设置
+  SConfig::GetInstance().SaveSettings();
+  
+  MappingWindow* window = new MappingWindow(this, MappingWindow::Type::MAPPING_GCPAD, 0);
+  window->setAttribute(Qt::WA_DeleteOnClose, true);
+  window->setWindowModality(Qt::WindowModality::WindowModal);
+  window->show();
 }
 
 void MainWindow::ShowSettingsWindow()

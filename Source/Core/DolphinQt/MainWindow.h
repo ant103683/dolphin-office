@@ -169,6 +169,8 @@ private:
   void ShowControllersWindow();
   void ShowGraphicsWindow();
   void ShowFreeLookWindow();
+  void ShowBindKeyWindow();
+
   void ShowAboutDialog();
   void ShowHotkeyDialog();
   void ShowNetPlaySetupDialog();
@@ -253,6 +255,7 @@ private:
   WiiSpeakWindow* m_wii_speak_window = nullptr;
   MappingWindow* m_hotkey_window = nullptr;
   FreeLookWindow* m_freelook_window = nullptr;
+  MappingWindow* m_bindkey_window = nullptr;
 
   HotkeyScheduler* m_hotkey_scheduler;
   NetPlayDialog* m_netplay_dialog;

@@ -108,6 +108,7 @@ signals:
   void ConfigureControllers();
   void ConfigureHotkeys();
   void ConfigureFreelook();
+  void ConfigureBindKey();
 
   // View
   void ShowList();
@@ -254,6 +255,7 @@ private:
   QAction* m_reset_ignore_panic_handler;
   QAction* m_change_font;
   QAction* m_controllers_action;
+  QAction* m_bindKey_action;
 
   // View
   QAction* m_show_code;
