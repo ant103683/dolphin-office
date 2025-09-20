@@ -98,5 +98,5 @@ private:
   std::atomic_bool m_processing_halted = false;
 };
 
-Q_DECLARE_METATYPE(std::shared_ptr<const UICommon::GameFile>)
+Q_DECLARE_METATYPE(std::shared_ptr< UICommon::GameFile>)
 Q_DECLARE_METATYPE(std::string)

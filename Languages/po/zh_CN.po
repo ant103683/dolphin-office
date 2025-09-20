@@ -7376,6 +7376,11 @@ msgstr "文件系统"
 msgid "Controllers"
 msgstr "控制器"
 
+#: Source/Core/DolphinQt/Config/SettingsWindow.cpp:143
+#: Source/Core/DolphinQt/ToolBar.cpp:132
+msgid "BindKey"
+msgstr "键位"
+
 #: Source/Core/DolphinQt/Config/SettingsWindow.cpp:144
 msgid "Interface"
 msgstr "界面"
@@ -15942,3 +15947,11 @@ msgstr "应用"
 #: qtbase/src/gui/kernel/qplatformtheme.cpp:742
 msgid "Restore Defaults"
 msgstr "恢复默认值"
+
+#: DolphinQt/Config/PlayerSelectionDialog.cpp:35
+msgid "Select which player's controller you want to configure:"
+msgstr "请选择您要配置的玩家控制器:"
+
+#: DolphinQt/Config/PlayerSelectionDialog.cpp:66
+msgid "Player %1"
+msgstr "玩家 %1"

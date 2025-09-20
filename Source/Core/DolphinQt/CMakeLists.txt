@@ -400,7 +400,7 @@ add_executable(dolphin-emu
   Updater.h
   WiiUpdate.cpp
   WiiUpdate.h
-)
+  "Config/PlayerSelectionDialog.cpp" "Config/PlayerSelectionDialog.h")
 
 if (WIN32)
   target_sources(dolphin-emu PRIVATE

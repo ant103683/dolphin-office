@@ -48,6 +48,7 @@
 #include "Core/Config/MainSettings.h"
 #include "Core/Config/NetplaySettings.h"
 #include "Core/Config/UISettings.h"
+#include "DolphinQt/Config/PlayerSelectionDialog.h"
 #include "Core/Config/WiimoteSettings.h"
 #include "Core/HW/SI/SI_Device.h"
 #include "Core/ConfigManager.h"
@@ -140,6 +141,9 @@
 
 #include "VideoCommon/NetPlayChatUI.h"
 #include "VideoCommon/VideoConfig.h"
+
+//#include "Core/Config/SIDevice.h"
+// #include "Core/HW/SI/SI_Device.h"
 
 #ifdef HAVE_XRANDR
 #include "UICommon/X11Utils.h"
@@ -696,7 +700,7 @@ void MainWindow::ConnectToolBar()
   connect(m_tool_bar, &ToolBar::ScreenShotPressed, this, &MainWindow::ScreenShot);
   connect(m_tool_bar, &ToolBar::SettingsPressed, this, &MainWindow::ShowSettingsWindow);
   connect(m_tool_bar, &ToolBar::ControllersPressed, this, &MainWindow::ShowControllersWindow);
-  connect(m_tool_bar, &ToolBar::BindKeyPressed, this, &MainWindow::ShowBindKeyWindow);
+  connect(m_tool_bar, &ToolBar::BindKeyPressed, this, &MainWindow::ShowPlayerSelectionDialog);
   connect(m_tool_bar, &ToolBar::GraphicsPressed, this, &MainWindow::ShowGraphicsWindow);
 
   connect(m_tool_bar, &ToolBar::StepPressed, m_code_widget, &CodeWidget::Step);
@@ -2091,3 +2095,24 @@ void MainWindow::ShowRiivolutionBootWidget(const UICommon::GameFile& game)
   AddRiivolutionPatches(boot_params.get(), std::move(w.GetPatches()));
   StartGame(std::move(boot_params));
 }
+
+void MainWindow::ShowPlayerSelectionDialog()
+{
+  PlayerSelectionDialog dialog(this);
+  
+  connect(&dialog, &PlayerSelectionDialog::PlayerSelected, this,
+          [this](int player_port) {
+            Config::SetBaseOrCurrent(Config::GetInfoForSIDevice(player_port), 
+                                   SerialInterface::SIDEVICE_GC_CONTROLLER);
+            
+            SConfig::GetInstance().SaveSettings();
+            
+            MappingWindow* window = new MappingWindow(this, MappingWindow::Type::MAPPING_GCPAD, player_port);
+            window->setAttribute(Qt::WA_DeleteOnClose, true);
+            window->setWindowModality(Qt::WindowModality::WindowModal);
+            window->show();
+          });
+  
+  dialog.exec();
+}
+
