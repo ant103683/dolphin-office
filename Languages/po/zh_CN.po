@@ -4736,6 +4736,10 @@ msgstr "用户配置"
 msgid "Graphics"
 msgstr "图形"
 
+#: Source/Core/DolphinQt/ToolBar.cpp:133
+msgid "NetplayList"
+msgstr "联机大厅"
+
 #: Source/Core/DolphinQt/Config/GameConfigWidget.cpp:243
 msgid ""
 "Italics mark default game settings, bold marks user settings.\n"

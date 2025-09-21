@@ -49,6 +49,7 @@
 #include "Core/Config/NetplaySettings.h"
 #include "Core/Config/UISettings.h"
 #include "Core/Config/WiimoteSettings.h"
+#include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/FreeLookManager.h"
 #include "Core/HW/DVD/DVDInterface.h"
@@ -69,6 +70,7 @@
 #include "Core/State.h"
 #include "Core/System.h"
 #include "Core/WiiUtils.h"
+#include "DolphinQt/Config/PlayerSelectionDialog.h"
 
 #include "DiscIO/DirectoryBlob.h"
 #include "DiscIO/NANDImporter.h"
@@ -82,7 +84,6 @@
 #include "DolphinQt/Config/LogWidget.h"
 #include "DolphinQt/Config/Mapping/MappingWindow.h"
 #include "DolphinQt/Config/SettingsWindow.h"
-#include "DolphinQt/Config/PlayerSelectionDialog.h"
 #include "DolphinQt/Debugger/AssemblerWidget.h"
 #include "DolphinQt/Debugger/BreakpointWidget.h"
 #include "DolphinQt/Debugger/CodeViewWidget.h"
@@ -257,12 +258,7 @@ MainWindow::MainWindow(Core::System& system, std::unique_ptr<BootParameters> boo
           });
 #endif
 
-  connect(m_cheats_manager, &CheatsManager::OpenGeneralSettings, this,
-          &MainWindow::ShowGeneralWindow);
-
 #ifdef USE_RETRO_ACHIEVEMENTS
-  connect(m_cheats_manager, &CheatsManager::OpenAchievementSettings, this,
-          &MainWindow::ShowAchievementSettings);
   connect(m_game_list, &GameList::OpenAchievementSettings, this,
           &MainWindow::ShowAchievementSettings);
 #endif  // USE_RETRO_ACHIEVEMENTS
@@ -482,7 +478,6 @@ void MainWindow::CreateComponents()
   m_watch_widget = new WatchWidget(this);
   m_breakpoint_widget = new BreakpointWidget(this);
   m_code_widget = new CodeWidget(this);
-  m_cheats_manager = new CheatsManager(m_system, this);
   m_assembler_widget = new AssemblerWidget(this);
 
   const auto request_watch = [this](QString name, u32 addr) {
@@ -524,8 +519,6 @@ void MainWindow::CreateComponents()
   });
   connect(m_breakpoint_widget, &BreakpointWidget::ShowMemory, m_memory_widget,
           &MemoryWidget::SetAddress);
-  connect(m_cheats_manager, &CheatsManager::ShowMemory, m_memory_widget, &MemoryWidget::SetAddress);
-  connect(m_cheats_manager, &CheatsManager::RequestWatch, request_watch);
 }
 
 void MainWindow::ConnectMenuBar()
@@ -564,7 +557,6 @@ void MainWindow::ConnectMenuBar()
   connect(m_menu_bar, &MenuBar::ConfigureControllers, this, &MainWindow::ShowControllersWindow);
   connect(m_menu_bar, &MenuBar::ConfigureHotkeys, this, &MainWindow::ShowHotkeyDialog);
   connect(m_menu_bar, &MenuBar::ConfigureFreelook, this, &MainWindow::ShowFreeLookWindow);
-
   // Tools
   connect(m_menu_bar, &MenuBar::ShowMemcardManager, this, &MainWindow::ShowMemcardManager);
   connect(m_menu_bar, &MenuBar::ShowResourcePackManager, this,
@@ -705,6 +697,7 @@ void MainWindow::ConnectToolBar()
   connect(m_tool_bar, &ToolBar::SettingsPressed, this, &MainWindow::ShowSettingsWindow);
   connect(m_tool_bar, &ToolBar::ControllersPressed, this, &MainWindow::ShowPlayerSelectionDialog);
   connect(m_tool_bar, &ToolBar::GraphicsPressed, this, &MainWindow::ShowGraphicsWindow);
+  connect(m_tool_bar, &ToolBar::NetplayList, this, &MainWindow::ShowNetPlayBrowser);
 
   connect(m_tool_bar, &ToolBar::StepPressed, m_code_widget, &CodeWidget::Step);
   connect(m_tool_bar, &ToolBar::StepOverPressed, m_code_widget, &CodeWidget::StepOver);
@@ -1282,26 +1275,6 @@ void MainWindow::ShowControllersWindow()
 {
   ShowSettingsWindow();
   m_settings_window->SelectPane(SettingsWindowPaneIndex::Controllers);
-}
-
-void MainWindow::ShowPlayerSelectionDialog()
-{
-  PlayerSelectionDialog dialog(this);
-
-  connect(&dialog, &PlayerSelectionDialog::PlayerSelected, this, [this](int player_port) {
-    Config::SetBaseOrCurrent(Config::GetInfoForSIDevice(player_port),
-                             SerialInterface::SIDEVICE_GC_CONTROLLER);
-
-    SConfig::GetInstance().SaveSettings();
-
-    MappingWindow* window =
-        new MappingWindow(this, MappingWindow::Type::MAPPING_GCPAD, player_port);
-    window->setAttribute(Qt::WA_DeleteOnClose, true);
-    window->setWindowModality(Qt::WindowModality::WindowModal);
-    window->show();
-  });
-
-  dialog.exec();
 }
 
 void MainWindow::ShowFreeLookWindow()
@@ -2058,6 +2031,22 @@ void MainWindow::ShowResourcePackManager()
 
 void MainWindow::ShowCheatsManager()
 {
+  if (!m_cheats_manager)
+  {
+    m_cheats_manager = new CheatsManager(m_system, this);
+
+    connect(m_cheats_manager, &CheatsManager::ShowMemory, m_memory_widget,
+            &MemoryWidget::SetAddress);
+    connect(m_cheats_manager, &CheatsManager::RequestWatch, m_watch_widget, &WatchWidget::AddWatch);
+    connect(m_cheats_manager, &CheatsManager::OpenGeneralSettings, this,
+            &MainWindow::ShowGeneralWindow);
+
+#ifdef USE_RETRO_ACHIEVEMENTS
+    connect(m_cheats_manager, &CheatsManager::OpenAchievementSettings, this,
+            &MainWindow::ShowAchievementSettings);
+#endif  // USE_RETRO_ACHIEVEMENTS
+  }
+
   m_cheats_manager->show();
 }
 
@@ -2088,4 +2077,24 @@ void MainWindow::ShowRiivolutionBootWidget(const UICommon::GameFile& game)
 
   AddRiivolutionPatches(boot_params.get(), std::move(w.GetPatches()));
   StartGame(std::move(boot_params));
+}
+
+void MainWindow::ShowPlayerSelectionDialog()
+{
+  PlayerSelectionDialog dialog(this);
+
+  connect(&dialog, &PlayerSelectionDialog::PlayerSelected, this, [this](int player_port) {
+    Config::SetBaseOrCurrent(Config::GetInfoForSIDevice(player_port),
+                             SerialInterface::SIDEVICE_GC_CONTROLLER);
+
+    SConfig::GetInstance().SaveSettings();
+
+    MappingWindow* window =
+        new MappingWindow(this, MappingWindow::Type::MAPPING_GCPAD, player_port);
+    window->setAttribute(Qt::WA_DeleteOnClose, true);
+    window->setWindowModality(Qt::WindowModality::WindowModal);
+    window->show();
+  });
+
+  dialog.exec();
 }
