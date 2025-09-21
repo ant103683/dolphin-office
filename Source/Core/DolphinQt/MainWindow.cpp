@@ -699,8 +699,8 @@ void MainWindow::ConnectToolBar()
   connect(m_tool_bar, &ToolBar::FullScreenPressed, this, &MainWindow::FullScreen);
   connect(m_tool_bar, &ToolBar::ScreenShotPressed, this, &MainWindow::ScreenShot);
   connect(m_tool_bar, &ToolBar::SettingsPressed, this, &MainWindow::ShowSettingsWindow);
-  connect(m_tool_bar, &ToolBar::ControllersPressed, this, &MainWindow::ShowControllersWindow);
-  connect(m_tool_bar, &ToolBar::BindKeyPressed, this, &MainWindow::ShowPlayerSelectionDialog);
+  connect(m_tool_bar, &ToolBar::ControllersPressed, this, &MainWindow::ShowPlayerSelectionDialog);
+  connect(m_tool_bar, &ToolBar::BindKeyPressed, this, &MainWindow::ShowNetPlayBrowser);
   connect(m_tool_bar, &ToolBar::GraphicsPressed, this, &MainWindow::ShowGraphicsWindow);
 
   connect(m_tool_bar, &ToolBar::StepPressed, m_code_widget, &CodeWidget::Step);

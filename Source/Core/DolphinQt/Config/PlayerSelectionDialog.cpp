@@ -32,7 +32,7 @@ void PlayerSelectionDialog::CreateLayout()
   m_title_label->setAlignment(Qt::AlignCenter);
 
   // Description label
-  m_description_label = new QLabel(tr("Select which player's controller you want to configure:"));
+  m_description_label = new QLabel(tr("Select the player controller you want to configure.If you need more advanced button configuration, go to the main menu, click 'Settings', then find 'Controllers' to access the full configuration options."));
   m_description_label->setAlignment(Qt::AlignCenter);
   m_description_label->setWordWrap(true);
 
@@ -71,7 +71,7 @@ void PlayerSelectionDialog::SetupPlayerButton(int player_index)
   // Set button properties
   m_player_buttons[player_index]->setMinimumSize(120, 60);
   m_player_buttons[player_index]->setStyleSheet(QStringLiteral("QPushButton {"
-                                                               "  font-size: 12px;"
+                                                               "  font-size: 14px;"
                                                                "  font-weight: bold;"
                                                                "  border: 2px solid #3498db;"
                                                                "  border-radius: 8px;"

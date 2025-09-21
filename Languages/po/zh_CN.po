@@ -15949,8 +15949,12 @@ msgid "Restore Defaults"
 msgstr "恢复默认值"
 
 #: DolphinQt/Config/PlayerSelectionDialog.cpp:35
-msgid "Select which player's controller you want to configure:"
-msgstr "请选择您要配置的玩家控制器:"
+msgid "Select the player controller you want to configure.If you need more advanced button configuration, go to the main menu, click 'Settings', then find 'Controllers' to access the full configuration options."
+msgstr "请选择您要配置的玩家控制器,如果你需要更多功能的按键配置,请在主界面点击'设置',然后找到'控制器',获得全部设置功能。"
+
+#: DolphinQt/Config/PlayerSelectionDialog.cpp:35
+msgid "Player Controller Setup"
+msgstr "玩家键位设置"
 
 #: DolphinQt/Config/PlayerSelectionDialog.cpp:66
 msgid "Player %1"
