@@ -82,6 +82,7 @@
 #include "DolphinQt/Config/LogWidget.h"
 #include "DolphinQt/Config/Mapping/MappingWindow.h"
 #include "DolphinQt/Config/SettingsWindow.h"
+#include "DolphinQt/Config/PlayerSelectionDialog.h"
 #include "DolphinQt/Debugger/AssemblerWidget.h"
 #include "DolphinQt/Debugger/BreakpointWidget.h"
 #include "DolphinQt/Debugger/CodeViewWidget.h"
@@ -702,7 +703,7 @@ void MainWindow::ConnectToolBar()
   connect(m_tool_bar, &ToolBar::FullScreenPressed, this, &MainWindow::FullScreen);
   connect(m_tool_bar, &ToolBar::ScreenShotPressed, this, &MainWindow::ScreenShot);
   connect(m_tool_bar, &ToolBar::SettingsPressed, this, &MainWindow::ShowSettingsWindow);
-  connect(m_tool_bar, &ToolBar::ControllersPressed, this, &MainWindow::ShowControllersWindow);
+  connect(m_tool_bar, &ToolBar::ControllersPressed, this, &MainWindow::ShowPlayerSelectionDialog);
   connect(m_tool_bar, &ToolBar::GraphicsPressed, this, &MainWindow::ShowGraphicsWindow);
 
   connect(m_tool_bar, &ToolBar::StepPressed, m_code_widget, &CodeWidget::Step);
@@ -1281,6 +1282,26 @@ void MainWindow::ShowControllersWindow()
 {
   ShowSettingsWindow();
   m_settings_window->SelectPane(SettingsWindowPaneIndex::Controllers);
+}
+
+void MainWindow::ShowPlayerSelectionDialog()
+{
+  PlayerSelectionDialog dialog(this);
+
+  connect(&dialog, &PlayerSelectionDialog::PlayerSelected, this, [this](int player_port) {
+    Config::SetBaseOrCurrent(Config::GetInfoForSIDevice(player_port),
+                             SerialInterface::SIDEVICE_GC_CONTROLLER);
+
+    SConfig::GetInstance().SaveSettings();
+
+    MappingWindow* window =
+        new MappingWindow(this, MappingWindow::Type::MAPPING_GCPAD, player_port);
+    window->setAttribute(Qt::WA_DeleteOnClose, true);
+    window->setWindowModality(Qt::WindowModality::WindowModal);
+    window->show();
+  });
+
+  dialog.exec();
 }
 
 void MainWindow::ShowFreeLookWindow()

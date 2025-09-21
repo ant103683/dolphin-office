@@ -181,6 +181,7 @@ private:
   void ShowResourcePackManager();
   void ShowCheatsManager();
   void ShowRiivolutionBootWidget(const UICommon::GameFile& game);
+  void ShowPlayerSelectionDialog();
 
 #ifdef USE_RETRO_ACHIEVEMENTS
   void ShowAchievementsWindow();
