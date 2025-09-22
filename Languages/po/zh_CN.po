@@ -10303,9 +10303,12 @@ msgstr "游戏 ID"
 
 #: Source/Core/DolphinQt/GameList/GameList.cpp:1033
 #: Source/Core/DolphinQt/MenuBar.cpp:716
-#: Source/Core/DolphinQt/NetPlay/NetPlayBrowser.cpp:221
 msgid "Region"
 msgstr "地区"
+
+#: Source/Core/DolphinQt/NetPlay/NetPlayBrowser.cpp:221
+msgid "NO."
+msgstr "编号"
 
 #: Source/Core/DolphinQt/GameList/GameList.cpp:1034
 #: Source/Core/DolphinQt/MenuBar.cpp:717
