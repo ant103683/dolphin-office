@@ -97,26 +97,26 @@ void GCPadEmu::OnPresetChanged(int index)
       }
       else if (group->name == "D-Pad")
       {
-        group->controls[0]->ui_name = "上";
-        group->controls[1]->ui_name = "下";
-        group->controls[2]->ui_name = "左";
-        group->controls[3]->ui_name = "右";
+        group->controls[0]->ui_name = "\xE4\xB8\x8A";  // "上"
+        group->controls[1]->ui_name = "\xE4\xB8\x8B";  // "下"
+        group->controls[2]->ui_name = "\xE5\xB7\xA6";  // "左"
+        group->controls[3]->ui_name = "\xE5\x8F\xB3";  // "右"
       }
       else if (group->name == "Control Stick")
       {
-        group->controls[0]->ui_name = "上";
-        group->controls[1]->ui_name = "下";
-        group->controls[2]->ui_name = "左";
-        group->controls[3]->ui_name = "右";
-        group->controls[4]->ui_name = "修饰键";
+        group->controls[0]->ui_name = "\xE4\xB8\x8A";  // "上"
+        group->controls[1]->ui_name = "\xE4\xB8\x8B";  // "下"
+        group->controls[2]->ui_name = "\xE5\xB7\xA6";  // "左"
+        group->controls[3]->ui_name = "\xE5\x8F\xB3";  // "右"
+        group->controls[4]->ui_name = "\xE4\xBF\xAE\xE9\xA5\xB0\xE9\x94\xAE";  // "修饰键"
       }
       else if (group->name == "C Stick")
       {
-        group->controls[0]->ui_name = "上";
-        group->controls[1]->ui_name = "下";
-        group->controls[2]->ui_name = "左";
-        group->controls[3]->ui_name = "右";
-        group->controls[4]->ui_name = "修饰键";
+        group->controls[0]->ui_name = "\xE4\xB8\x8A";  // "上"
+        group->controls[1]->ui_name = "\xE4\xB8\x8B";  // "下"
+        group->controls[2]->ui_name = "\xE5\xB7\xA6";  // "左"
+        group->controls[3]->ui_name = "\xE5\x8F\xB3";  // "右"
+        group->controls[4]->ui_name = "\xE4\xBF\xAE\xE9\xA5\xB0\xE9\x94\xAE";  // "修饰键"
       }
       else if (group->name == "Triggers")
       {
@@ -124,8 +124,8 @@ void GCPadEmu::OnPresetChanged(int index)
         group->controls[1]->ui_name = "R-Analog";
         group->controls[2]->ui_name = "L";
         group->controls[3]->ui_name = "R";
-        group->controls[4]->ui_name = "L-模拟";
-        group->controls[5]->ui_name = "R-模拟";
+        // group->controls[4]->ui_name = "L-\xE6\xA8\xA1\xE6\x8B\x9F";  // "L-模拟"
+        // group->controls[5]->ui_name = "R-\xE6\xA8\xA1\xE6\x8B\x9F";  // "R-模拟"
       }
     }
   }
@@ -171,8 +171,8 @@ void GCPadEmu::OnPresetChanged(int index)
         group->controls[1]->ui_name = "R-An";
         group->controls[2]->ui_name = "L-Tr";
         group->controls[3]->ui_name = "R-Tr";
-        group->controls[4]->ui_name = "L-An-Btn";
-        group->controls[5]->ui_name = "R-An-Btn";
+        // group->controls[4]->ui_name = "L-An-Btn";
+        // group->controls[5]->ui_name = "R-An-Btn";
       }
     }
   }
