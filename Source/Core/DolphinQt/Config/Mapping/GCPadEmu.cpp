@@ -58,8 +58,9 @@ void GCPadEmu::CreateMainLayout()
 
   for (const auto& info : s_group_box_infos)
   {
-    layout->addWidget(CreateGroupBox(tr(info.name), Pad::GetGroup(GetPort(), info.group_id)),
-                      info.row, info.col, info.rowspan, info.colspan);
+    auto* group_box = CreateGroupBox(tr(info.name), Pad::GetGroup(GetPort(), info.group_id));
+    m_group_boxes[info.name] = group_box;
+    layout->addWidget(group_box, info.row, info.col, info.rowspan, info.colspan);
   }
 
   setLayout(layout);
@@ -71,6 +72,7 @@ void GCPadEmu::OnPresetChanged(int index)
   auto* controller = GetController();
   if (!controller)
     return;
+
   for (auto& group : controller->groups)
   {
     for (auto& control : group->controls)
@@ -79,55 +81,118 @@ void GCPadEmu::OnPresetChanged(int index)
     }
   }
 
-  if (index == 1)  // Game 1
+  // Hardcoded presets for testing
+  if (index == 1)  // Game 1 Preset
   {
-    auto* buttons = Pad::GetGroup(GetPort(), PadGroup::Buttons);
-    for (auto& control : buttons->controls)
+    for (auto& group : controller->groups)
     {
-      if (control->name == "A")
-        control->ui_name = "Action";
-      if (control->name == "B")
-        control->ui_name = "Back";
-      if (control->name == "X")
-        control->ui_name = "Use Item";
-      if (control->name == "Y")
-        control->ui_name = "Jump";
-      if (control->name == "Z")
-        control->ui_name = "Camera";
-      if (control->name == "START")
-        control->ui_name = "Pause";
+      if (group->name == "Buttons")
+      {
+        group->controls[0]->ui_name = "Action";
+        group->controls[1]->ui_name = "Back";
+        group->controls[2]->ui_name = "Use Item";
+        group->controls[3]->ui_name = "Jump";
+        group->controls[4]->ui_name = "Camera";
+        group->controls[5]->ui_name = "Start";
+      }
+      else if (group->name == "D-Pad")
+      {
+        group->controls[0]->ui_name = "上";
+        group->controls[1]->ui_name = "下";
+        group->controls[2]->ui_name = "左";
+        group->controls[3]->ui_name = "右";
+      }
+      else if (group->name == "Control Stick")
+      {
+        group->controls[0]->ui_name = "上";
+        group->controls[1]->ui_name = "下";
+        group->controls[2]->ui_name = "左";
+        group->controls[3]->ui_name = "右";
+        group->controls[4]->ui_name = "修饰键";
+      }
+      else if (group->name == "C Stick")
+      {
+        group->controls[0]->ui_name = "上";
+        group->controls[1]->ui_name = "下";
+        group->controls[2]->ui_name = "左";
+        group->controls[3]->ui_name = "右";
+        group->controls[4]->ui_name = "修饰键";
+      }
+      else if (group->name == "Triggers")
+      {
+        group->controls[0]->ui_name = "L-Analog";
+        group->controls[1]->ui_name = "R-Analog";
+        group->controls[2]->ui_name = "L";
+        group->controls[3]->ui_name = "R";
+        group->controls[4]->ui_name = "L-模拟";
+        group->controls[5]->ui_name = "R-模拟";
+      }
     }
   }
-  else if (index == 2)  // Game 2
+  else if (index == 2)  // Game 2 Preset
   {
-    auto* buttons = Pad::GetGroup(GetPort(), PadGroup::Buttons);
-    for (auto& control : buttons->controls)
+    for (auto& group : controller->groups)
     {
-      if (control->name == "A")
-        control->ui_name = "Confirm";
-      if (control->name == "B")
-        control->ui_name = "Cancel";
-      if (control->name == "X")
-        control->ui_name = "Menu";
-      if (control->name == "Y")
-        control->ui_name = "Map";
-      if (control->name == "Z")
-        control->ui_name = "Special";
-      if (control->name == "START")
-        control->ui_name = "Options";
+      if (group->name == "Buttons")
+      {
+        group->controls[0]->ui_name = "A";
+        group->controls[1]->ui_name = "B";
+        group->controls[2]->ui_name = "X";
+        group->controls[3]->ui_name = "Y";
+        group->controls[4]->ui_name = "Z";
+        group->controls[5]->ui_name = "Start";
+      }
+      else if (group->name == "D-Pad")
+      {
+        group->controls[0]->ui_name = "D-Up";
+        group->controls[1]->ui_name = "D-Down";
+        group->controls[2]->ui_name = "D-Left";
+        group->controls[3]->ui_name = "D-Right";
+      }
+      else if (group->name == "Control Stick")
+      {
+        group->controls[0]->ui_name = "M-Up";
+        group->controls[1]->ui_name = "M-Down";
+        group->controls[2]->ui_name = "M-Left";
+        group->controls[3]->ui_name = "M-Right";
+        group->controls[4]->ui_name = "M-Mod";
+      }
+      else if (group->name == "C Stick")
+      {
+        group->controls[0]->ui_name = "C-Up";
+        group->controls[1]->ui_name = "C-Down";
+        group->controls[2]->ui_name = "C-Left";
+        group->controls[3]->ui_name = "C-Right";
+        group->controls[4]->ui_name = "C-Mod";
+      }
+      else if (group->name == "Triggers")
+      {
+        group->controls[0]->ui_name = "L-An";
+        group->controls[1]->ui_name = "R-An";
+        group->controls[2]->ui_name = "L-Tr";
+        group->controls[3]->ui_name = "R-Tr";
+        group->controls[4]->ui_name = "L-An-Btn";
+        group->controls[5]->ui_name = "R-An-Btn";
+      }
     }
   }
 
-  auto* l = static_cast<QGridLayout*>(layout());
+  auto* grid_layout = static_cast<QGridLayout*>(layout());
+  for (auto& pair : m_group_boxes)
+  {
+    if (pair.second)
+    {
+      grid_layout->removeWidget(pair.second);
+      pair.second->deleteLater();
+    }
+  }
+  m_group_boxes.clear();
+
   for (const auto& info : s_group_box_infos)
   {
-    QLayoutItem* old_item = l->itemAtPosition(info.row, info.col);
-    if (old_item)
-    {
-      delete old_item->widget();
-    }
-    l->addWidget(CreateGroupBox(tr(info.name), Pad::GetGroup(GetPort(), info.group_id)), info.row,
-                 info.col, info.rowspan, info.colspan);
+    auto* group_box = CreateGroupBox(tr(info.name), Pad::GetGroup(GetPort(), info.group_id));
+    m_group_boxes[info.name] = group_box;
+    grid_layout->addWidget(group_box, info.row, info.col, info.rowspan, info.colspan);
   }
 }
 

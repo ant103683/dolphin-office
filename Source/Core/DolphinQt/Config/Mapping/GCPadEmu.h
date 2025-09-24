@@ -3,9 +3,13 @@
 
 #pragma once
 
+#include <map>
+#include <string>
+
 #include "DolphinQt/Config/Mapping/MappingWidget.h"
 
 class QComboBox;
+class QGroupBox;
 
 class GCPadEmu final : public MappingWidget
 {
@@ -13,13 +17,16 @@ class GCPadEmu final : public MappingWidget
 public:
   explicit GCPadEmu(MappingWindow* window);
 
-  InputConfig* GetConfig() override;
-
-private:
-  void LoadSettings() override;
-  void SaveSettings() override;
-  void CreateMainLayout();
+private slots:
   void OnPresetChanged(int index);
 
+private:
+  void CreateMainLayout();
+  void LoadSettings() override;
+  void SaveSettings() override;
+
+  InputConfig* GetConfig() override;
+
   QComboBox* m_preset_combo;
+  std::map<std::string, QGroupBox*> m_group_boxes;
 };
