@@ -9,13 +9,14 @@
 
 namespace ControllerEmu
 {
-Input::Input(Translatability translate_, std::string name_, std::string ui_name_)
-    : Control(std::make_unique<InputReference>(), translate_, std::move(name_), std::move(ui_name_))
+Input::Input(Translatability translate, std::string name, std::string ui_name)
+    : Control(translate, std::move(name), std::move(ui_name),
+              std::make_unique<InputReference>())
 {
 }
 
-Input::Input(Translatability translate_, std::string name_)
-    : Control(std::make_unique<InputReference>(), translate_, std::move(name_))
+Input::Input(Translatability translate, std::string name)
+    : Control(translate, std::move(name), std::make_unique<InputReference>())
 {
 }
 }  // namespace ControllerEmu

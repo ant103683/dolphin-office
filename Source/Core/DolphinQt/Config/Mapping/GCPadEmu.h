@@ -5,6 +5,8 @@
 
 #include "DolphinQt/Config/Mapping/MappingWidget.h"
 
+class QComboBox;
+
 class GCPadEmu final : public MappingWidget
 {
   Q_OBJECT
@@ -17,4 +19,7 @@ private:
   void LoadSettings() override;
   void SaveSettings() override;
   void CreateMainLayout();
+  void OnPresetChanged(int index);
+
+  QComboBox* m_preset_combo;
 };

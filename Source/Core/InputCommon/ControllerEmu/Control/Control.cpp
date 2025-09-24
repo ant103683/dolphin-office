@@ -8,18 +8,16 @@
 
 namespace ControllerEmu
 {
-Control::Control(std::unique_ptr<ControlReference> ref, Translatability translate_,
-                 std::string name_, std::string ui_name_)
-    : control_ref(std::move(ref)), translate(translate_), name(std::move(name_)),
-      ui_name(std::move(ui_name_))
+Control::Control(Translatability translate, std::string name, std::string ui_name,
+                 std::unique_ptr<ControlReference> ref)
+    : name(std::move(name)), ui_name(std::move(ui_name)), translate(translate),
+      control_ref(std::move(ref))
 {
 }
 
-Control::Control(std::unique_ptr<ControlReference> ref, Translatability translate_,
-                 std::string name_)
-    : control_ref(std::move(ref)), translate(translate_), name(name_), ui_name(std::move(name_))
+Control::Control(Translatability translate, std::string name, std::unique_ptr<ControlReference> ref)
+    : Control(translate, std::move(name), name, std::move(ref))
 {
 }
 
-Control::~Control() = default;
 }  // namespace ControllerEmu
