@@ -174,6 +174,8 @@ add_executable(dolphin-emu
   Config/Mapping/WiimoteEmuMotionControl.h
   Config/Mapping/WiimoteEmuMotionControlIMU.cpp
   Config/Mapping/WiimoteEmuMotionControlIMU.h
+	Config/Mapping/GCPadCustomPresetDialog.cpp
+	Config/Mapping/GCPadCustomPresetDialog.h
   Config/NewPatchDialog.cpp
   Config/NewPatchDialog.h
   Config/PatchesWidget.cpp
@@ -182,6 +184,8 @@ add_executable(dolphin-emu
   Config/PropertiesDialog.h
   Config/SettingsWindow.cpp
   Config/SettingsWindow.h
+	Config/PlayerSelectionDialog.cpp
+	Config/PlayerSelectionDialog.h
   Config/ToolTipControls/BalloonTip.cpp
   Config/ToolTipControls/BalloonTip.h
   Config/ToolTipControls/ToolTipCheckBox.cpp
@@ -400,7 +404,6 @@ add_executable(dolphin-emu
   Updater.h
   WiiUpdate.cpp
   WiiUpdate.h
-	"Config/PlayerSelectionDialog.cpp" "Config/PlayerSelectionDialog.h"
 )
 
 if (WIN32)

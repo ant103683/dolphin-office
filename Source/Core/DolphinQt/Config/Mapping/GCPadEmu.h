@@ -13,6 +13,7 @@
 
 class QComboBox;
 class QGroupBox;
+class QPushButton;
 
 class GCPadEmu final : public MappingWidget
 {
@@ -22,6 +23,7 @@ public:
 
 private slots:
   void OnPresetChanged(int index);
+  void OnCustomMappingButtonPressed();
 
 private:
   void CreateMainLayout();
@@ -38,6 +40,7 @@ private:
   };
 
   QComboBox* m_preset_combo;
+  QPushButton* m_custom_mapping_button;
   std::map<std::string, QGroupBox*> m_group_boxes;
   std::vector<PadPreset> m_presets;
 };

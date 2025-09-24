@@ -121,6 +121,7 @@
     <ClCompile Include="Config\Mapping\WiimoteEmuGeneral.cpp" />
     <ClCompile Include="Config\Mapping\WiimoteEmuMotionControl.cpp" />
     <ClCompile Include="Config\Mapping\WiimoteEmuMotionControlIMU.cpp" />
+    <ClCompile Include="Config\Mapping\GCPadCustomPresetDialog.cpp" />
     <ClCompile Include="Config\NewPatchDialog.cpp" />
     <ClCompile Include="Config\PatchesWidget.cpp" />
     <ClCompile Include="Config\PlayerSelectionDialog.cpp" />

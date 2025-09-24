@@ -10,6 +10,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
+#include <QPushButton>
 
 #include "Common/FileUtil.h"
 #include "Common/Logging/Log.h"
@@ -47,6 +48,8 @@ GCPadEmu::GCPadEmu(MappingWindow* window) : MappingWidget(window)
   CreateMainLayout();
   connect(m_preset_combo, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this,
           &GCPadEmu::OnPresetChanged);
+  connect(m_custom_mapping_button, &QPushButton::clicked, this,
+          &GCPadEmu::OnCustomMappingButtonPressed);
 }
 
 void GCPadEmu::LoadPresets()
@@ -97,8 +100,10 @@ void GCPadEmu::CreateMainLayout()
   }
 
   auto* preset_label = new QLabel(tr("Custom Game Key Mapping Template:"));
+  m_custom_mapping_button = new QPushButton(tr("Custom Key Template"));
   layout->addWidget(preset_label, 0, 0);
-  layout->addWidget(m_preset_combo, 0, 1, 1, 3);
+  layout->addWidget(m_preset_combo, 0, 1, 1, 2);
+  layout->addWidget(m_custom_mapping_button, 0, 3);
 
   for (const auto& info : s_group_box_infos)
   {
@@ -164,6 +169,10 @@ void GCPadEmu::OnPresetChanged(int index)
     m_group_boxes[info.name] = group_box;
     grid_layout->addWidget(group_box, info.row, info.col, info.rowspan, info.colspan);
   }
+}
+
+void GCPadEmu::OnCustomMappingButtonPressed()
+{
 }
 
 void GCPadEmu::LoadSettings()
