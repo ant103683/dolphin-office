@@ -4,9 +4,15 @@
 #include "DolphinQt/Config/Mapping/GCPadEmu.h"
 
 #include <QComboBox>
+#include <QFile>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QLabel>
+
+#include "Common/FileUtil.h"
+#include "Common/Logging/Log.h"
 
 #include "Core/HW/GCPad.h"
 #include "Core/HW/GCPadEmu.h"
@@ -43,16 +49,54 @@ GCPadEmu::GCPadEmu(MappingWindow* window) : MappingWidget(window)
           &GCPadEmu::OnPresetChanged);
 }
 
+void GCPadEmu::LoadPresets()
+{
+  std::string path = File::GetSysDirectory() + "/Profiles/GCPadPresets.json";
+  QFile file(QString::fromStdString(path));
+  if (!file.open(QIODevice::ReadOnly))
+  {
+    //ERROR_LOG(COMMON, "Failed to open GCPadPresets.json at %s", path.c_str());
+    return;
+  }
+
+  QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+  if (doc.isNull())
+  {
+    //ERROR_LOG(COMMON, "Failed to parse GCPadPresets.json. It might be malformed.");
+    return;
+  }
+
+  QJsonObject root = doc.object();
+  QJsonArray presets = root[QString::fromStdString("presets")].toArray();
+
+  //NOTICE_LOG(COMMON, "Found %d presets in GCPadPresets.json", presets.size());
+
+  for (const auto& preset_value : presets)
+  {
+    QJsonObject preset_obj = preset_value.toObject();
+    PadPreset preset;
+    preset.title = preset_obj[QString::fromStdString("title")].toString();
+    preset.mappings = preset_obj[QString::fromStdString("mappings")].toObject();
+    m_presets.push_back(preset);
+    //NOTICE_LOG(COMMON, "Loaded preset: %s", preset.title.toUtf8().constData());
+  }
+}
+
 void GCPadEmu::CreateMainLayout()
 {
   auto* layout = new QGridLayout;
 
   m_preset_combo = new QComboBox;
   m_preset_combo->addItem(tr("Default"));
-  m_preset_combo->addItem(tr("Game 1 Preset"));
-  m_preset_combo->addItem(tr("Game 2 Preset"));
 
-  auto* preset_label = new QLabel(tr("Button Preset:"));
+  LoadPresets();
+
+  for (const auto& preset : m_presets)
+  {
+    m_preset_combo->addItem(preset.title);
+  }
+
+  auto* preset_label = new QLabel(tr("Custom Game Key Mapping Template:"));
   layout->addWidget(preset_label, 0, 0);
   layout->addWidget(m_preset_combo, 0, 1, 1, 3);
 
@@ -81,98 +125,24 @@ void GCPadEmu::OnPresetChanged(int index)
     }
   }
 
-  // Hardcoded presets for testing
-  if (index == 1)  // Game 1 Preset
+  if (index == 0)  // Default
   {
-    for (auto& group : controller->groups)
-    {
-      if (group->name == "Buttons")
-      {
-        group->controls[0]->ui_name = "Action";
-        group->controls[1]->ui_name = "Back";
-        group->controls[2]->ui_name = "Use Item";
-        group->controls[3]->ui_name = "Jump";
-        group->controls[4]->ui_name = "Camera";
-        group->controls[5]->ui_name = "Start";
-      }
-      else if (group->name == "D-Pad")
-      {
-        group->controls[0]->ui_name = "\xE4\xB8\x8A";  // "上"
-        group->controls[1]->ui_name = "\xE4\xB8\x8B";  // "下"
-        group->controls[2]->ui_name = "\xE5\xB7\xA6";  // "左"
-        group->controls[3]->ui_name = "\xE5\x8F\xB3";  // "右"
-      }
-      else if (group->name == "Control Stick")
-      {
-        group->controls[0]->ui_name = "\xE4\xB8\x8A";  // "上"
-        group->controls[1]->ui_name = "\xE4\xB8\x8B";  // "下"
-        group->controls[2]->ui_name = "\xE5\xB7\xA6";  // "左"
-        group->controls[3]->ui_name = "\xE5\x8F\xB3";  // "右"
-        group->controls[4]->ui_name = "\xE4\xBF\xAE\xE9\xA5\xB0\xE9\x94\xAE";  // "修饰键"
-      }
-      else if (group->name == "C Stick")
-      {
-        group->controls[0]->ui_name = "\xE4\xB8\x8A";  // "上"
-        group->controls[1]->ui_name = "\xE4\xB8\x8B";  // "下"
-        group->controls[2]->ui_name = "\xE5\xB7\xA6";  // "左"
-        group->controls[3]->ui_name = "\xE5\x8F\xB3";  // "右"
-        group->controls[4]->ui_name = "\xE4\xBF\xAE\xE9\xA5\xB0\xE9\x94\xAE";  // "修饰键"
-      }
-      else if (group->name == "Triggers")
-      {
-        group->controls[0]->ui_name = "L-Analog";
-        group->controls[1]->ui_name = "R-Analog";
-        group->controls[2]->ui_name = "L";
-        group->controls[3]->ui_name = "R";
-        // group->controls[4]->ui_name = "L-\xE6\xA8\xA1\xE6\x8B\x9F";  // "L-模拟"
-        // group->controls[5]->ui_name = "R-\xE6\xA8\xA1\xE6\x8B\x9F";  // "R-模拟"
-      }
-    }
+    // UI is already reset to default, so just refresh it
   }
-  else if (index == 2)  // Game 2 Preset
+  else
   {
+    const auto& preset = m_presets[index - 1];
+    const auto& mappings = preset.mappings;
+
     for (auto& group : controller->groups)
     {
-      if (group->name == "Buttons")
+      if (mappings.contains(QString::fromStdString(group->name)))
       {
-        group->controls[0]->ui_name = "A";
-        group->controls[1]->ui_name = "B";
-        group->controls[2]->ui_name = "X";
-        group->controls[3]->ui_name = "Y";
-        group->controls[4]->ui_name = "Z";
-        group->controls[5]->ui_name = "Start";
-      }
-      else if (group->name == "D-Pad")
-      {
-        group->controls[0]->ui_name = "D-Up";
-        group->controls[1]->ui_name = "D-Down";
-        group->controls[2]->ui_name = "D-Left";
-        group->controls[3]->ui_name = "D-Right";
-      }
-      else if (group->name == "Control Stick")
-      {
-        group->controls[0]->ui_name = "M-Up";
-        group->controls[1]->ui_name = "M-Down";
-        group->controls[2]->ui_name = "M-Left";
-        group->controls[3]->ui_name = "M-Right";
-        group->controls[4]->ui_name = "M-Mod";
-      }
-      else if (group->name == "C Stick")
-      {
-        group->controls[0]->ui_name = "C-Up";
-        group->controls[1]->ui_name = "C-Down";
-        group->controls[2]->ui_name = "C-Left";
-        group->controls[3]->ui_name = "C-Right";
-        group->controls[4]->ui_name = "C-Mod";
-      }
-      else if (group->name == "Triggers")
-      {
-        group->controls[0]->ui_name = "L-An";
-        group->controls[1]->ui_name = "R-An";
-        group->controls[2]->ui_name = "L-Tr";
-        group->controls[3]->ui_name = "R-Tr";
-        // group->controls[4]->ui_name = "L-An-Btn";
-        // group->controls[5]->ui_name = "R-An-Btn";
+        QJsonArray mapping_array = mappings[QString::fromStdString(group->name)].toArray();
+        for (int i = 0; i < mapping_array.size() && i < group->controls.size(); ++i)
+        {
+          group->controls[i]->ui_name = mapping_array[i].toString().toStdString();
+        }
       }
     }
   }

@@ -5,6 +5,9 @@
 
 #include <map>
 #include <string>
+#include <vector>
+
+#include <QJsonObject>
 
 #include "DolphinQt/Config/Mapping/MappingWidget.h"
 
@@ -24,9 +27,17 @@ private:
   void CreateMainLayout();
   void LoadSettings() override;
   void SaveSettings() override;
+  void LoadPresets();
 
   InputConfig* GetConfig() override;
 
+  struct PadPreset
+  {
+    QString title;
+    QJsonObject mappings;
+  };
+
   QComboBox* m_preset_combo;
   std::map<std::string, QGroupBox*> m_group_boxes;
+  std::vector<PadPreset> m_presets;
 };

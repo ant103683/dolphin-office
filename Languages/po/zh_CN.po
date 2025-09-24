@@ -1659,6 +1659,10 @@ msgstr "错误：此版本不支持模拟 GBA 控制器"
 msgid "Wii Remote"
 msgstr "Wii 遥控器"
 
+#: Source/Core/Core/HW/Wiimote.cpp:101
+msgid "Custom Game Key Mapping Template:"
+msgstr "自定义游戏键位模板:"
+
 #: Source/Core/Core/HW/WiimoteEmu/Extension/Classic.cpp:50
 #: Source/Core/DolphinQt/Config/Mapping/WiimoteEmuExtension.cpp:45
 msgid "Classic Controller"
