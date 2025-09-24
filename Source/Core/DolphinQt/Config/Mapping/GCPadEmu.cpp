@@ -12,6 +12,7 @@
 #include <QLabel>
 #include <QPushButton>
 
+#include "DolphinQt/Config/Mapping/GCPadCustomPresetDialog.h"
 #include "Common/FileUtil.h"
 #include "Common/Logging/Log.h"
 
@@ -173,6 +174,18 @@ void GCPadEmu::OnPresetChanged(int index)
 
 void GCPadEmu::OnCustomMappingButtonPressed()
 {
+  GCPadCustomPresetDialog dialog(this);
+  if (dialog.exec() == QDialog::Accepted)
+  {
+    m_preset_combo->clear();
+    m_preset_combo->addItem(tr("Default"));
+    m_presets.clear();
+    LoadPresets();
+    for (const auto& preset : m_presets)
+    {
+      m_preset_combo->addItem(preset.title);
+    }
+  }
 }
 
 void GCPadEmu::LoadSettings()
