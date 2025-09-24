@@ -17,6 +17,7 @@
 #include <QStyleHints>
 #include <QVBoxLayout>
 #include <QWindow>
+#include <QPushButton>
 
 #include <fmt/format.h>
 
@@ -740,6 +741,69 @@ void MainWindow::ConnectStack()
   auto* layout = new QVBoxLayout;
   widget->setLayout(layout);
 
+  // 添加联机控件容器
+  auto* netplayContainer = new QWidget;
+  auto* netplayLayout = new QHBoxLayout;  // 使用 QHBoxLayout 水平排列
+  netplayContainer->setLayout(netplayLayout);
+
+  // 添加联机昵称标签和输入框
+  auto* nicknameLabel = new QLabel(tr("联机昵称:"));
+  m_nickname_edit = new QLineEdit;
+  // 设置初始值为配置中的昵称
+  m_nickname_edit->setText(QString::fromStdString(Config::Get(Config::NETPLAY_NICKNAME)));
+  // 设置左边距，使文本不紧贴边缘
+  m_nickname_edit->setTextMargins(2, 0, 0, 0);
+
+  // 添加IP地址标签和输入框
+  auto* ipLabel = new QLabel(tr("IP地址:"));
+  m_ip_edit = new QLineEdit;
+  // 设置初始值为配置中的IP地址
+  m_ip_edit->setText(QString::fromStdString(Config::Get(Config::NETPLAY_ADDRESS)));
+  // 设置左边距，使文本不紧贴边缘
+  m_ip_edit->setTextMargins(2, 0, 0, 0);
+
+  // 添加端口标签和SpinBox输入框
+  auto* portLabel = new QLabel(tr("端口:"));
+  m_port_box = new QSpinBox();     // 确保 m_port_box 被正确创建为 QSpinBox
+  m_port_box->setRange(1, 65535);  // 设置端口的有效范围
+  u16 port_value_init = Config::Get(Config::NETPLAY_CONNECT_PORT);  // 获取 u16 类型的值
+  m_port_box->setValue(port_value_init);                            // 设置 QSpinBox 的初始值
+  m_ip_edit->setTextMargins(2, 0, 0, 0);
+
+  // 添加连接按钮
+  auto* connectButton = new QPushButton(tr("Connect"));
+
+  netplayLayout->addWidget(nicknameLabel);
+  netplayLayout->addWidget(m_nickname_edit);
+  netplayLayout->addWidget(ipLabel);
+  netplayLayout->addWidget(m_ip_edit);
+  netplayLayout->addWidget(portLabel);
+  netplayLayout->addWidget(m_port_box);
+  netplayLayout->addWidget(connectButton);
+
+  // 连接按钮信号
+  connect(connectButton, &QPushButton::clicked, this, [this]() {
+    QString nickname = m_nickname_edit->text();
+    QString ip = m_ip_edit->text();
+    // 从 QSpinBox 获取端口值 (u16)
+    u16 port_val = static_cast<u16>(m_port_box->value());
+
+    Config::SetBaseOrCurrent(Config::NETPLAY_NICKNAME, nickname.toStdString());
+    Config::SetBaseOrCurrent(Config::NETPLAY_ADDRESS, ip.toStdString());
+    // 保存 u16 类型的端口到配置
+    Config::SetBaseOrCurrent(Config::NETPLAY_CONNECT_PORT, port_val);
+    Config::Save();
+
+    if (!nickname.isEmpty() && !ip.isEmpty())
+    {
+      // NetPlayJoinWithParams 需要 u16 或 std::string 类型的端口，根据其定义调整
+      // 假设 NetPlayJoinWithParams 的第三个参数是 std::string
+      NetPlayJoinWithParams(nickname.toStdString(), ip.toStdString(), port_val);
+    }
+  });
+
+  // 首先添加联机控件容器，然后是游戏列表
+  layout->addWidget(netplayContainer);
   layout->addWidget(m_game_list);
   layout->addWidget(m_search_bar);
   layout->setContentsMargins(0, 0, 0, 0);
@@ -1613,6 +1677,62 @@ bool MainWindow::NetPlayJoin()
 
   m_netplay_setup_dialog->close();
   m_netplay_dialog->show(nickname, is_traversal);
+
+  return true;
+}
+
+bool MainWindow::NetPlayJoinWithParams(std::string nickname, std::string connect_ip, u16 connect_port)
+{
+  //bool avail = MainWindow::checkAvailable();
+  //if (!avail)
+  //{
+  //  return false;
+  //}
+
+  if (!Core::IsUninitialized(m_system))
+  {
+    ModalMessageBox::critical(nullptr, tr("Error"),
+                              tr("Can't start a NetPlay Session while a game is still running!"));
+    return false;
+  }
+
+  if (m_netplay_dialog->isVisible())
+  {
+    ModalMessageBox::critical(nullptr, tr("Error"),
+                              tr("A NetPlay Session is already in progress!"));
+    return false;
+  }
+
+  std::string host_ip = connect_ip;
+  u16 host_port;
+
+  const std::string nick_name = nickname;
+  host_port = connect_port;
+
+  // unused
+  const std::string traversal_host = Config::Get(Config::NETPLAY_TRAVERSAL_SERVER);
+  const u16 traversal_port = Config::Get(Config::NETPLAY_TRAVERSAL_PORT);
+
+  // Create Client
+  const bool is_hosting_netplay = false;
+  Settings::Instance().ResetNetPlayClient(new NetPlay::NetPlayClient(
+      host_ip, host_port, m_netplay_dialog, nick_name,
+      NetPlay::NetTraversalConfig{is_hosting_netplay, traversal_host, traversal_port}));
+
+  if (!Settings::Instance().GetNetPlayClient()->IsConnected())
+  {
+    NetPlayQuit();
+    return false;
+  }
+
+  m_netplay_setup_dialog->close();
+  m_netplay_dialog->show(nick_name, false);
+
+  std::string msg = "connect to " + host_ip;
+
+  //NetPlayDialog::uploadDbzInfoAsync("/dbzInfo",msg, [](picojson::object result) {
+
+  //});
 
   return true;
 }

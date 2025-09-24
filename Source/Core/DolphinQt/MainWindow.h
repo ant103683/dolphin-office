@@ -5,6 +5,8 @@
 
 #include <QMainWindow>
 #include <QStringList>
+#include <QLineEdit>
+#include <QSpinBox>
 
 #include <array>
 #include <memory>
@@ -191,6 +193,7 @@ private:
 
   void NetPlayInit();
   bool NetPlayJoin();
+  bool NetPlayJoinWithParams(std::string nickname, std::string connect_ip, u16 connect_port);
   bool NetPlayHost(const UICommon::GameFile& game);
   void NetPlayQuit();
 
@@ -244,6 +247,11 @@ private:
   bool m_is_screensaver_inhibited = false;
   u32 m_state_slot = 1;
   std::unique_ptr<BootParameters> m_pending_boot;
+
+  // [依禾] 主界面添加联机界面
+  QLineEdit* m_nickname_edit = nullptr;
+  QLineEdit* m_ip_edit = nullptr;
+  QSpinBox* m_port_box = nullptr;
 
   SettingsWindow* m_settings_window = nullptr;
   // m_fifo_window doesn't set MainWindow as its parent so that the fifo can be focused without
