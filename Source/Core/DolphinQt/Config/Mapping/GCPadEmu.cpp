@@ -11,6 +11,7 @@
 #include <QJsonDocument>
 #include <QLabel>
 #include <QPushButton>
+#include <QTimer>
 
 #include "DolphinQt/Config/Mapping/GCPadCustomPresetDialog.h"
 #include "Common/FileUtil.h"
@@ -51,6 +52,19 @@ GCPadEmu::GCPadEmu(MappingWindow* window) : MappingWidget(window)
           &GCPadEmu::OnPresetChanged);
   connect(m_custom_mapping_button, &QPushButton::clicked, this,
           &GCPadEmu::OnCustomMappingButtonPressed);
+
+#ifdef __APPLE__
+  // macOS specific fix: Delay layout initialization to prevent UI distortion
+  QTimer::singleShot(0, this, [this]() {
+    // Force a preset change to trigger proper layout initialization
+    if (m_preset_combo->count() > 0) {
+      int current_index = m_preset_combo->currentIndex();
+      OnPresetChanged(current_index);
+    }
+    // Force layout update
+    layout()->update();
+  });
+#endif
 }
 
 void GCPadEmu::LoadPresets()
