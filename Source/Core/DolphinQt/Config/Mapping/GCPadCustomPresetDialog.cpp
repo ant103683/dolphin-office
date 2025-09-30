@@ -193,7 +193,7 @@ void GCPadCustomPresetDialog::Save()
   control_stick.append(m_control_stick_left_edit->text().isEmpty() ? QStringLiteral("M-Left") : m_control_stick_left_edit->text());
   control_stick.append(m_control_stick_right_edit->text().isEmpty() ? QStringLiteral("M-Right") : m_control_stick_right_edit->text());
   control_stick.append(m_control_stick_modifier_edit->text().isEmpty() ? QStringLiteral("M-Mod") : m_control_stick_modifier_edit->text());
-  mappings[QStringLiteral("Control Stick")] = control_stick;
+  mappings[QStringLiteral("Main Stick")] = control_stick;
   
   // C Stick array with default values
   QJsonArray c_stick;
@@ -202,7 +202,7 @@ void GCPadCustomPresetDialog::Save()
   c_stick.append(m_c_stick_left_edit->text().isEmpty() ? QStringLiteral("C-Left") : m_c_stick_left_edit->text());
   c_stick.append(m_c_stick_right_edit->text().isEmpty() ? QStringLiteral("C-Right") : m_c_stick_right_edit->text());
   c_stick.append(m_c_stick_modifier_edit->text().isEmpty() ? QStringLiteral("C-Mod") : m_c_stick_modifier_edit->text());
-  mappings[QStringLiteral("C Stick")] = c_stick;
+  mappings[QStringLiteral("C-Stick")] = c_stick;
   
   // Triggers array with default values
   QJsonArray triggers;
