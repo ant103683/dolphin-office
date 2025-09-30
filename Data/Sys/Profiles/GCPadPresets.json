@@ -1,33 +1,13 @@
 {
   "presets": [
     {
-      "title": "Game 1 Preset",
+      "title": "电光火石3",
       "mappings": {
-        "Buttons": ["Action", "Back", "Use Item", "Jump", "Camera", "Start"],
+        "Buttons": ["攻击", "冲刺", "防御", "气弹", "聚气", "菜单"],
         "D-Pad": ["上", "下", "左", "右"],
-        "C-Stick": ["上", "下", "左", "右", "哈哈哈"],
-        "Main Stick": ["上", "下", "左", "右", "无敌了"],
-        "Triggers": ["L-Analog", "R-Analog", "L", "R"]
-      }
-    },
-    {
-      "title": "Game 2 Preset",
-      "mappings": {
-        "Buttons": ["A", "B", "X", "Y", "Z", "Start"],
-        "D-Pad": ["D-Up", "D-Down", "D-Left", "D-Right"],
-        "Main Stick": ["M-Up", "M-Down", "M-Left", "M-Right", "M-Mod"],
-        "C-Stick": ["C-Up", "C-Down", "C-Left", "C-Right", "C-Mod"],
-        "Triggers": ["L-An", "R-An", "L-Tr", "R-Tr"]
-      }
-    },
-    {
-      "title": "Game 3 Preset",
-      "mappings": {
-        "Buttons": ["A", "你", "X", "Y", "Z", "Start"],
-        "D-Pad": ["D-Up", "D-Down", "D-Left", "D-Right"],
-        "Main Stick": ["M-Up", "M-Down", "M-Left", "M-Right", "M-Mod"],
-        "C-Stick": ["C-Up", "C-Down", "C-Left", "C-Right", "C-Mod"],
-        "Triggers": ["L-An", "R-An", "L-Tr", "R-Tr"]
+        "C-Stick": ["换人", "变身", "向左视角", "向右视角", "无用键"],
+        "Main Stick": ["上", "下", "左", "右", "无用键"],
+        "Triggers": ["速降", "速升", "下降", "上升"]
       }
     }
   ]
