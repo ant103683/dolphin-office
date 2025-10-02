@@ -27,7 +27,7 @@ WiiSaveBanner::WiiSaveBanner(u64 title_id)
 
   constexpr size_t MINIMUM_SIZE = sizeof(Header) + BANNER_SIZE + ICON_SIZE;
 
-  m_path = Common::GetTitleDataPath(title_id, Common::FromWhichRoot::Configured) + "/banner.bin";
+  m_path = Common::GetTitleDataPathForGame(title_id, Common::FromWhichRoot::Configured) + "/banner.bin";
   File::IOFile file(m_path, "rb");
 
   if (!file)

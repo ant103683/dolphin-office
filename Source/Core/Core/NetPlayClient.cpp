@@ -1191,7 +1191,7 @@ void NetPlayClient::OnSyncSaveDataWii(sf::Packet& packet)
     u64 title_id = Common::PacketReadU64(packet);
     titles.push_back(title_id);
     temp_fs->CreateFullPath(IOS::PID_KERNEL, IOS::PID_KERNEL,
-                            Common::GetTitleDataPath(title_id) + '/', 0, fs_modes);
+                            Common::GetTitleDataPathForGame(title_id) + '/', 0, fs_modes);
     auto save = WiiSave::MakeNandStorage(temp_fs.get(), title_id);
 
     bool exists;

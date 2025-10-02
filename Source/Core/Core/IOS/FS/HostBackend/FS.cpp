@@ -4,7 +4,10 @@
 #include "Core/IOS/FS/HostBackend/FS.h"
 
 #include <algorithm>
+#include <cstring>
 #include <cmath>
+
+#include "Core/ConfigManager.h"
 #include <optional>
 #include <string_view>
 #include <type_traits>
@@ -43,6 +46,40 @@ HostFileSystem::HostFilename HostFileSystem::BuildFilename(const std::string& wi
     }
   }
 
+  // Hash-based save redirection for game titles (00010000)
+  // If a per-game hash has been configured, we insert it as an extra subdirectory between the
+  // title ID and the remaining path (typically "/data" and its children).  This keeps the logical
+  // Wii path unchanged while storing the data in a unique host directory.
+  const SConfig* cfg = SConfig::GetInstancePtr();
+  if (cfg)
+  {
+    const std::string& hash8 = cfg->GetSaveHash8();
+    if (!hash8.empty() && wii_path.starts_with("/title/00010000/"))
+  {
+    // Split the Wii path into components.
+    const size_t third_sep = wii_path.find('/', std::strlen("/title/00010000/"));
+    if (third_sep != std::string::npos)
+    {
+      const std::string prefix = wii_path.substr(0, third_sep);      // /title/00010000/<tid>
+      const std::string remainder = wii_path.substr(third_sep);      // e.g. /data/...
+      const std::string hashed_wii_path = fmt::format("{}/{}/{}", prefix, hash8, remainder.substr(1));
+       const std::string host_old = m_root_path + Common::EscapePath(wii_path);
+       const std::string host_new = m_root_path + Common::EscapePath(hashed_wii_path);
+       // If old path exists and new doesn't, migrate by renaming.
+       if (!File::Exists(host_new) && File::Exists(host_old))
+       {
+         File::CreateFullPath(host_new + '/');
+         File::Rename(host_old, host_new);
+       }
+      // Debug logging
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+      if (File::IOFile log_file{log_path, "ab"})
+        log_file.WriteString(fmt::format("redirect {} -> {}\n", wii_path, hashed_wii_path));
+      return HostFilename{m_root_path + Common::EscapePath(hashed_wii_path), false};
+    }
+  }
+  }
+  
   ASSERT(!m_root_path.empty());
 
   if (wii_path.starts_with("/"))

@@ -110,8 +110,10 @@ struct SConfig
   // Load settings
   void LoadSettings();
 
-  // Return the permanent and somewhat globally used instance of this struct
+  // Return the permanent and somewhat globally used instance of this struct (must call Init() first)
   static SConfig& GetInstance() { return (*m_Instance); }
+  // Returns nullptr if Init() has not been called yet — useful during very early startup
+  static const SConfig* GetInstancePtr() { return m_Instance; }
   static void Init();
   static void Shutdown();
 
@@ -135,4 +137,13 @@ private:
   std::string m_title_description;
   u64 m_title_id;
   u16 m_revision;
+
+  // 8-character SHA-1 prefix used to distinguish per-image Wii save directories
+  std::string m_save_hash8;
+
+public:
+  // Returns empty string if current title should use legacy save path
+  const std::string& GetSaveHash8() const;
+  void SetSaveHash8(const std::string& hash8) { m_save_hash8 = hash8; }
+
 };

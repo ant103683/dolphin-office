@@ -30,6 +30,7 @@ std::string GetTicketFileName(u64 title_id, std::optional<FromWhichRoot> from = 
 std::string GetV1TicketFileName(u64 title_id, std::optional<FromWhichRoot> from = {});
 std::string GetTitlePath(u64 title_id, std::optional<FromWhichRoot> from = {});
 std::string GetTitleDataPath(u64 title_id, std::optional<FromWhichRoot> from = {});
+std::string GetTitleDataPathForGame(u64 title_id, std::optional<FromWhichRoot> from = {});
 std::string GetTitleContentPath(u64 title_id, std::optional<FromWhichRoot> from = {});
 std::string GetTMDFileName(u64 title_id, std::optional<FromWhichRoot> from = {});
 std::string GetMiiDatabasePath(std::optional<FromWhichRoot> from = {});

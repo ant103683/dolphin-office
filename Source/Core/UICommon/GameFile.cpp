@@ -793,7 +793,7 @@ GameFile::CompareSyncIdentifier(const NetPlay::SyncIdentifier& sync_identifier) 
 std::string GameFile::GetWiiFSPath() const
 {
   ASSERT(DiscIO::IsWii(m_platform));
-  return Common::GetTitleDataPath(m_title_id, Common::FromWhichRoot::Configured);
+  return Common::GetTitleDataPathForGame(m_title_id, Common::FromWhichRoot::Configured);
 }
 
 bool GameFile::ShouldShowFileFormatDetails() const

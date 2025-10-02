@@ -14,6 +14,8 @@
 #include "Common/Contains.h"
 #include "Common/FileUtil.h"
 #include "Common/StringUtil.h"
+#include "Common/IOFile.h"  // for File::IOFile
+#include "Core/ConfigManager.h"
 
 namespace Common
 {
@@ -69,6 +71,34 @@ std::string GetTitlePath(u64 title_id, std::optional<FromWhichRoot> from)
 std::string GetTitleDataPath(u64 title_id, std::optional<FromWhichRoot> from)
 {
   return GetTitlePath(title_id, from) + "/data";
+}
+
+std::string GetTitleDataPathForGame(u64 title_id, std::optional<FromWhichRoot> from)
+{
+  const std::string base = GetTitlePath(title_id, from);
+  const std::string& hash8 = SConfig::GetInstance().GetSaveHash8();
+  if (!hash8.empty())
+  {
+    // Construct path including the hash folder
+    const std::string path = fmt::format("{}/{}/data", base, hash8);
+
+    // Debug: append information to logs/savehash8.txt
+    static bool first_call = true;
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    File::IOFile log_file(log_path, "ab");
+    if (log_file)
+    {
+      if (first_call)
+      {
+        log_file.WriteString(fmt::format("hash8={}\n", hash8));
+        first_call = false;
+      }
+      log_file.WriteString(fmt::format("title={:016x}, path={}\n", title_id, path));
+    }
+
+    return path;
+  }
+  return base + "/data";
 }
 
 std::string GetTitleContentPath(u64 title_id, std::optional<FromWhichRoot> from)
