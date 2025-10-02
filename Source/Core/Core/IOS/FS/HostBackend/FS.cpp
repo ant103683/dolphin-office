@@ -63,15 +63,29 @@ HostFileSystem::HostFilename HostFileSystem::BuildFilename(const std::string& wi
       const std::string prefix = wii_path.substr(0, third_sep);      // /title/00010000/<tid>
       const std::string remainder = wii_path.substr(third_sep);      // e.g. /data/...
       const std::string hashed_wii_path = fmt::format("{}/{}/{}", prefix, hash8, remainder.substr(1));
-       const std::string host_old = m_root_path + Common::EscapePath(wii_path);
-       const std::string host_new = m_root_path + Common::EscapePath(hashed_wii_path);
-       // If old path exists and new doesn't, migrate by renaming.
-       if (!File::Exists(host_new) && File::Exists(host_old))
-       {
-         File::CreateFullPath(host_new + '/');
-         File::Rename(host_old, host_new);
-       }
+      const std::string host_old = m_root_path + Common::EscapePath(wii_path);
+      const std::string host_new = m_root_path + Common::EscapePath(hashed_wii_path);
+
+      // Perform one-time migration for the base "/data" directory so that legacy saves are moved
+      // into the new hash directory.  We only create the parent directory (…/<tid>/<hash>) before
+      // attempting the rename; creating the destination itself would make the rename fail.
+      if (!File::Exists(host_new) && File::Exists(host_old))
+      {
+        const std::string host_new_parent = host_new.substr(0, host_new.find_last_of("/\\"));
+        File::CreateFullPath(host_new_parent + '/');
+
+        if (!File::Rename(host_old, host_new))
+        {
+          // If rename fails (e.g. cross-device), fall back to recursive copy + delete.
+          if (File::Copy(host_old, host_new, true))
+            File::DeleteDirRecursively(host_old);
+          else
+            ERROR_LOG_FMT(IOS_FS, "Save migration failed from {} to {}", host_old, host_new);
+        }
+      }
+
       // Debug logging
+      
       const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
       if (File::IOFile log_file{log_path, "ab"})
         log_file.WriteString(fmt::format("redirect {} -> {}\n", wii_path, hashed_wii_path));
