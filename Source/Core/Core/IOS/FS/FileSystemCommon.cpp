@@ -122,9 +122,23 @@ ResultCode FileSystem::CreateFullPath(Uid uid, Gid gid, const std::string& path,
     if (metadata && metadata->is_file)
       return ResultCode::Invalid;
 
+    // Debug log before attempting subpath creation or validation
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+      if (File::IOFile log_file{log_path, "ab"})
+        log_file.WriteString(fmt::format("[CreateFullPath] inspecting subpath={}\n", subpath));
+    }
     if (!metadata)
     {
       const ResultCode result = CreateDirectory(uid, gid, subpath, attribute, modes);
+
+      // Debug log after creation attempt
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+        if (File::IOFile log_file{log_path, "ab"})
+          log_file.WriteString(fmt::format("[CreateFullPath] create_directory subpath={} result={}\n", subpath, static_cast<int>(result)));
+      }
+
       if (result != ResultCode::Success)
         return result;
     }

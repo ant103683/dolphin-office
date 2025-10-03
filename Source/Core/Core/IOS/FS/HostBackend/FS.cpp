@@ -519,6 +519,12 @@ ResultCode HostFileSystem::CreateFileOrDirectory(Uid uid, Gid gid, const std::st
   const auto split_path = SplitPathAndBasename(path);
   const std::string host_path = BuildFilename(path).host_path;
 
+  // Debug log for creation attempt
+  {
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    if (File::IOFile log_file{log_path, "ab"})
+      log_file.WriteString(fmt::format("[CreateFileOrDirectory] attempt path={} host={} is_file={}\n", path, host_path, is_file));
+  }
   FstEntry* parent = GetFstEntryForPath(split_path.parent);
   if (!parent)
     return ResultCode::NotFound;
@@ -529,7 +535,14 @@ ResultCode HostFileSystem::CreateFileOrDirectory(Uid uid, Gid gid, const std::st
   if (File::Exists(host_path))
     return ResultCode::AlreadyExists;
 
-  const bool ok = is_file ? File::CreateEmptyFile(host_path) : File::CreateDir(host_path);
+  const bool ok = is_file ? File::CreateEmptyFile(host_path) : File::CreateDirs(host_path);
+
+  // Debug log for result
+  {
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    if (File::IOFile log_file{log_path, "ab"})
+      log_file.WriteString(fmt::format("[CreateFileOrDirectory] result={} errno={}\n", ok, Common::LastStrerrorString()));
+  }
   if (!ok)
   {
     ERROR_LOG_FMT(IOS_FS, "Failed to create file or directory: {}", host_path);
