@@ -16,6 +16,7 @@
 #include "Common/StringUtil.h"
 #include "Common/IOFile.h"  // for File::IOFile
 #include "Core/ConfigManager.h"
+#include <filesystem>
 
 namespace Common
 {
@@ -80,7 +81,14 @@ std::string GetTitleDataPathForGame(u64 title_id, std::optional<FromWhichRoot> f
   if (!hash8.empty())
   {
     // Construct path including the hash folder
-    const std::string path = fmt::format("{}/{}/data", base, hash8);
+    std::string path = fmt::format("{}/{}/data", base, hash8);
+
+    // Collapse accidental duplicate hash segment, e.g. /hash8/hash8/data → /hash8/data
+    const std::string duplicate = "/" + hash8 + "/" + hash8 + "/";
+    const std::string single = "/" + hash8 + "/";
+    const size_t dup_pos = path.find(duplicate);
+    if (dup_pos != std::string::npos)
+      path.replace(dup_pos, duplicate.length(), single);
 
     // Debug: append information to logs/savehash8.txt
     static bool first_call = true;
@@ -90,10 +98,11 @@ std::string GetTitleDataPathForGame(u64 title_id, std::optional<FromWhichRoot> f
     {
       if (first_call)
       {
+        log_file.WriteString("==== GetTitleDataPathForGame DEBUG START ====" "\n");
         log_file.WriteString(fmt::format("hash8={}\n", hash8));
         first_call = false;
       }
-      log_file.WriteString(fmt::format("title={:016x}, path={}\n", title_id, path));
+      log_file.WriteString(fmt::format("[HASH] title={:016x}, path={}\n", title_id, path));
     }
 
     return path;
@@ -216,3 +225,35 @@ bool IsFileNameSafe(const std::string_view filename)
          std::ranges::none_of(filename, IsIllegalCharacter);
 }
 }  // namespace Common
+
+namespace Common
+{
+std::vector<std::string> GetAllHash8ForTitle(u64 title_id, std::optional<FromWhichRoot> from)
+{
+  std::vector<std::string> hashes;
+  namespace fs = std::filesystem;
+  const std::string base_title_path = GetTitlePath(title_id, from);
+  std::error_code ec;
+  for (const auto& dir_entry : fs::directory_iterator(base_title_path, ec))
+  {
+    if (ec)
+      break;
+    if (!dir_entry.is_directory())
+      continue;
+    const std::string name = dir_entry.path().filename().string();
+    if (name.size() == 8 && std::all_of(name.begin(), name.end(), [](unsigned char c) {
+          return std::isxdigit(c);
+        }))
+      hashes.push_back(name);
+  }
+  const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+  File::CreateFullPath(log_path);
+  File::IOFile log_file(log_path, "ab");
+  if (log_file)
+  {
+    log_file.WriteString(fmt::format("[GetAllHash8] title={:016x}, count={}, list=[{}]\n", title_id,
+                                     hashes.size(), fmt::join(hashes, ",")));
+  }
+  return hashes;
+}
+} // namespace Common

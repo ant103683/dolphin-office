@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <optional>
 
 #include "Common/CommonTypes.h"
 
@@ -45,6 +46,9 @@ CopyResult Copy(Storage* source, Storage* destination);
 
 /// Import a save into the NAND from a .bin file.
 CopyResult Import(const std::string& data_bin_path, std::function<bool()> can_overwrite);
+
+/// Read the title ID from a .bin save file without importing.
+std::optional<u64> GetTitleIDFromDataBin(const std::string& data_bin_path);
 /// Export a save to a .bin file.
 CopyResult Export(u64 tid, std::string_view export_path);
 /// Export all saves that are in the NAND. Returns the number of exported saves.

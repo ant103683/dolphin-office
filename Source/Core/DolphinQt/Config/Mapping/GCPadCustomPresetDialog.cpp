@@ -226,5 +226,5 @@ void GCPadCustomPresetDialog::Save()
 
   accept();
 }
-
-#include "moc_GCPadCustomPresetDialog.cpp"
+// SelectHashDialog
+// #include "moc_GCPadCustomPresetDialog.cpp"

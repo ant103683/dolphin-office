@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "Common/CommonTypes.h"
 
@@ -47,4 +48,7 @@ std::string EscapePath(const std::string& path);
 std::string UnescapeFileName(const std::string& filename);
 // Tests for a file name being "safe" as per the escaping defined in EscapeFileName
 bool IsFileNameSafe(const std::string_view filename);
+// Returns list of 8-character hash directories found under the title path (excluding "data").
+// If no hash directory exists, the vector will be empty.
+std::vector<std::string> GetAllHash8ForTitle(u64 title_id, std::optional<FromWhichRoot> from = {});
 }  // namespace Common
