@@ -187,11 +187,34 @@ public:
     if (!m_uid || !m_gid)
       return false;
 
-    for (const SaveFile& file : files)
+    // ------------- 调试日志 -------------
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    File::CreateFullPath(log_path);
+    File::IOFile log_file(log_path, "ab");
+    if (log_file)
     {
-      const FS::Modes modes = GetFsMode(file.mode);
-      const std::string path = m_data_dir + '/' + file.path;
-      if (file.type == SaveFile::Type::File)
+      log_file.WriteString(fmt::format("[WriteFiles] m_data_dir={}\n", m_data_dir));
+      log_file.WriteString(fmt::format("[WriteFiles] incoming files={}\n", files.size()));
+    }
+
+     for (const SaveFile& file : files)
+     {
+      // 再次写入每个条目信息
+      if (log_file)
+      {
+        log_file.WriteString(fmt::format("  - file.path={} type={}\n", file.path,
+                                         file.type == SaveFile::Type::File ? "File" : "Dir"));
+      }
+
+       const FS::Modes modes = GetFsMode(file.mode);
+       const std::string path = m_data_dir + '/' + file.path;
+
+      if (log_file)
+      {
+        log_file.WriteString(fmt::format("    => dest_path={}\n", path));
+      }
+
+       if (file.type == SaveFile::Type::File)
       {
         const auto raw_file = m_fs->CreateAndOpenFile(*m_uid, *m_gid, path, modes);
         const std::optional<std::vector<u8>>& data = *file.data;

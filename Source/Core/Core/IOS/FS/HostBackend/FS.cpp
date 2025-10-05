@@ -62,6 +62,19 @@ HostFileSystem::HostFilename HostFileSystem::BuildFilename(const std::string& wi
     {
       const std::string prefix = wii_path.substr(0, third_sep);      // /title/00010000/<tid>
       const std::string remainder = wii_path.substr(third_sep);      // e.g. /data/...
+
+      // Avoid duplicating the hash directory if it is already present just after the title ID.
+      const size_t next_sep = remainder.find('/', 1);                // skip leading '/'
+      const std::string_view first_component =
+          next_sep != std::string::npos ? std::string_view(remainder).substr(1, next_sep - 1)
+                                        : std::string_view(remainder).substr(1);
+      if (first_component == hash8)
+      {
+        // The incoming path is already redirecting to the hash directory; return as-is.
+        const std::string host_existing = m_root_path + Common::EscapePath(wii_path);
+        return HostFilename{host_existing, false};
+      }
+
       const std::string hashed_wii_path = fmt::format("{}/{}/{}", prefix, hash8, remainder.substr(1));
       const std::string host_old = m_root_path + Common::EscapePath(wii_path);
       const std::string host_new = m_root_path + Common::EscapePath(hashed_wii_path);
