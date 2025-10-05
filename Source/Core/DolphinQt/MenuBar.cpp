@@ -19,12 +19,14 @@
 
 #include <fmt/format.h>
 #include <optional>
+#include <algorithm>
 
 #include "Common/Align.h"
 #include "Common/CommonPaths.h"
 #include "Common/FileUtil.h"
 #include "Common/IOFile.h"
 #include "Common/StringUtil.h"
+#include "Common/NandPaths.h"
 
 #include "Core/AchievementManager.h"
 #include "Core/CommonTitles.h"
@@ -1222,7 +1224,9 @@ void MenuBar::ImportWiiSave()
   }
 
   // Query all existing hash8 directories for this Title ID in the NAND
-  std::vector<std::string> hash8_dirs = Common::GetAllHash8ForTitle(*title_id);
+  std::vector<std::string> hash8_dirs =
+      Common::GetAllHash8ForTitle(*title_id, Common::FromWhichRoot::Configured);
+
   std::string selected_hash;
   if (hash8_dirs.size() > 1)
   {
