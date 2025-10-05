@@ -64,6 +64,21 @@ QVariant GameListModel::data(const QModelIndex& index, int role) const
 
   const UICommon::GameFile& game = *m_games[index.row()];
 
+  if (role == Qt::TextAlignmentRole)
+  {
+    const Column col = static_cast<Column>(index.column());
+    switch (col)
+    {
+    // Keep long-text columns left-aligned for readability
+    case Column::Title:
+    case Column::Description:
+    case Column::FilePath:
+      break;
+    default:
+      return Qt::AlignCenter;
+    }
+  }
+
   switch (static_cast<Column>(index.column()))
   {
   case Column::Platform:
