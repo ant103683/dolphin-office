@@ -21,6 +21,8 @@
 #include "UICommon/GameFile.h"
 #include "UICommon/UICommon.h"
 
+#include "Common/StringUtil.h"
+
 const QSize GAMECUBE_BANNER_SIZE(96, 32);
 
 GameListModel::GameListModel(QObject* parent) : QAbstractTableModel(parent)
@@ -139,6 +141,14 @@ QVariant GameListModel::data(const QModelIndex& index, int role) const
           .replace(QLatin1Char('\n'), QLatin1Char(' '));
     }
     break;
+  case Column::Version:
+    if (role == Qt::DisplayRole || role == SORT_ROLE)
+    {
+      const auto hash = game.GetSyncHash();
+      const std::string hex = Common::BytesToHexString(hash);
+      return QString::fromStdString(hex.substr(0, 8));
+    }
+    break;
   case Column::Maker:
     if (role == Qt::DisplayRole || role == SORT_ROLE)
     {
@@ -241,6 +251,8 @@ QVariant GameListModel::headerData(int section, Qt::Orientation orientation, int
     return tr("Banner");
   case Column::Description:
     return tr("Description");
+  case Column::Version:
+    return tr("Version");
   case Column::Maker:
     return tr("Maker");
   case Column::FileName:

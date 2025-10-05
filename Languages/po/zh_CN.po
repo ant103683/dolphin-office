@@ -1569,6 +1569,10 @@ msgstr "MemoryCard: ClearBlock 在无效地址 ({0:#x}) 中调用"
 msgid "Control Stick"
 msgstr "控制摇杆"
 
+#: ???/SelectHashDialog.cpp
+msgid "This save file corresponds to multiple versions of the game. Please select the version you want to use with this save file. Each game version number can be viewed on the emulator's main interface."
+msgstr "该存档对应的游戏存在多个版本,请选择想要使用该存档的版本,每个游戏版本号在模拟器主界面可以看到."
+
 #: Source/Core/Core/HW/GCPadEmu.cpp:55
 #: Source/Core/DolphinQt/Config/Mapping/GCPadEmu.cpp:31
 #: Source/Core/DolphinQt/TAS/GCTASInputWindow.cpp:31

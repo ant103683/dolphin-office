@@ -230,6 +230,7 @@ void GameList::MakeListView()
     SetResizeMode(Column::Banner, Mode::Fixed);
     SetResizeMode(Column::Title, Mode::Interactive);
     SetResizeMode(Column::Description, Mode::Interactive);
+    SetResizeMode(Column::Version, Mode::Fixed);
     SetResizeMode(Column::Maker, Mode::Interactive);
     SetResizeMode(Column::ID, Mode::Fixed);
     SetResizeMode(Column::Country, Mode::Fixed);
@@ -296,6 +297,7 @@ void GameList::UpdateColumnVisibility()
   SetVisiblity(Column::Banner, Config::Get(Config::MAIN_GAMELIST_COLUMN_BANNER));
   SetVisiblity(Column::Title, Config::Get(Config::MAIN_GAMELIST_COLUMN_TITLE));
   SetVisiblity(Column::Description, Config::Get(Config::MAIN_GAMELIST_COLUMN_DESCRIPTION));
+  SetVisiblity(Column::Version, true);
   SetVisiblity(Column::Maker, Config::Get(Config::MAIN_GAMELIST_COLUMN_MAKER));
   SetVisiblity(Column::ID, Config::Get(Config::MAIN_GAMELIST_COLUMN_GAME_ID));
   SetVisiblity(Column::Country, Config::Get(Config::MAIN_GAMELIST_COLUMN_REGION));
@@ -1073,6 +1075,7 @@ void GameList::OnColumnVisibilityToggled(const QString& row, bool visible)
       {tr("Banner"), Column::Banner},
       {tr("Title"), Column::Title},
       {tr("Description"), Column::Description},
+      {tr("Version"), Column::Version},
       {tr("Maker"), Column::Maker},
       {tr("File Name"), Column::FileName},
       {tr("File Path"), Column::FilePath},

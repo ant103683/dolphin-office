@@ -644,9 +644,21 @@ std::string GameFile::GetNetPlayName(const Core::TitleDatabase& title_database) 
     std::string disc_text = "Disc ";
     info.push_back(disc_text + std::to_string(disc_number));
   }
+
+  // Build the base NetPlay name using the original logic first.
+  std::string base_name;
   if (info.empty())
-    return name;
-  return fmt::format("{} ({})", name, fmt::join(info, ", "));
+    base_name = name;
+  else
+    base_name = fmt::format("{}({})", name, fmt::join(info, ", "));
+
+  // Append short sync-hash (first 8 hex characters) so hosts/clients can distinguish
+  // between different revisions/modifications of the same title.
+  const auto sync_hash = GetSyncHash();
+  const std::string hash_hex = Common::BytesToHexString(sync_hash);
+  const std::string hash8 = hash_hex.substr(0, 8);
+
+  return fmt::format("{}({})", base_name, hash8);
 }
 
 static Common::SHA1::Digest GetHash(u32 value)

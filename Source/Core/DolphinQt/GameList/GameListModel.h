@@ -51,6 +51,7 @@ public:
     Banner,
     Title,
     Description,
+    Version,
     Maker,
     ID,
     Country,

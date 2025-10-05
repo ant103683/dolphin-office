@@ -4,16 +4,25 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QVBoxLayout>
+#include <QLabel>
 
 namespace DolphinQt
 {
 SelectHashDialog::SelectHashDialog(const std::vector<std::string>& hashes, QWidget* parent)
     : QDialog(parent)
 {
-  setWindowTitle(tr("Select Save Directory"));
+  setWindowTitle(tr("Select Save Version"));
   resize(300, 400);
 
   auto* layout = new QVBoxLayout(this);
+
+  // Add explanatory label so users understand why they need to pick a version.
+  auto* info_label = new QLabel(tr("This save file corresponds to multiple versions of the game. "
+                                   "Please select the version you want to use with this save file. "
+                                   "Each game version number can be viewed on the emulator's main interface."),
+                               this);
+  info_label->setWordWrap(true);
+  layout->addWidget(info_label);
 
   m_list = new QListWidget(this);
   for (const std::string& h : hashes)
