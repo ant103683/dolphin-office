@@ -342,8 +342,8 @@ struct SetGameMetadata
       config->SetSaveHash8(hash8);
 
       // Debug: write hash8 to a log file for verification
-      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
-      File::WriteStringToFile(log_path, hash8 + "\n");
+      // const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+      // File::WriteStringToFile(log_path, hash8 + "\n");
 
     }
     else

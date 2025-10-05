@@ -801,13 +801,13 @@ IPCReply ESDevice::DIVerify(const IOCtlVRequest& request)
 
 static ReturnCode WriteTmdForDiVerify(FS::FileSystem* fs, const ES::TMDReader& tmd)
 {
-  const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+  // const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
   // Record entry into this helper
-  {
-    File::IOFile log_file(log_path, "ab");
-    if (log_file)
-      log_file.WriteString(fmt::format("[WriteTmdForDiVerify] title={:016x}\n", tmd.GetTitleId()));
-  }
+  //{
+    //File::IOFile log_file(log_path, "ab");
+    // if (log_file)
+      // log_file.WriteString(fmt::format("[WriteTmdForDiVerify] title={:016x}\n", tmd.GetTitleId()));
+  //}
 
   const std::string temp_path = "/tmp/title.tmd";
   fs->Delete(PID_KERNEL, PID_KERNEL, temp_path);
@@ -826,11 +826,11 @@ static ReturnCode WriteTmdForDiVerify(FS::FileSystem* fs, const ES::TMDReader& t
   const auto result = fs->CreateFullPath(PID_KERNEL, PID_KERNEL, tmd_path, 0, parent_modes);
 
   // Log createFullPath result
-  {
-    File::IOFile log_file(log_path, "ab");
-    if (log_file)
-      log_file.WriteString(fmt::format("[WriteTmdForDiVerify] create_full_path_result={} path={}\n", static_cast<int>(result), tmd_path));
-  }
+  //{
+  //  File::IOFile log_file(log_path, "ab");
+  //  if (log_file)
+  //    log_file.WriteString(fmt::format("[WriteTmdForDiVerify] create_full_path_result={} path={}\n", static_cast<int>(result), tmd_path));
+  //}
 
   if (result != FS::ResultCode::Success)
     return FS::ConvertResult(result);
@@ -839,11 +839,11 @@ static ReturnCode WriteTmdForDiVerify(FS::FileSystem* fs, const ES::TMDReader& t
   const auto rename_ret = fs->Rename(PID_KERNEL, PID_KERNEL, temp_path, tmd_path);
 
   // Log rename result
-  {
-    File::IOFile log_file(log_path, "ab");
-    if (log_file)
-      log_file.WriteString(fmt::format("[WriteTmdForDiVerify] rename {} -> {} result={}\n", temp_path, tmd_path, static_cast<int>(rename_ret)));
-  }
+  //{
+  //  File::IOFile log_file(log_path, "ab");
+  //  if (log_file)
+  //    log_file.WriteString(fmt::format("[WriteTmdForDiVerify] rename {} -> {} result={}\n", temp_path, tmd_path, static_cast<int>(rename_ret)));
+  //}
 
   return FS::ConvertResult(rename_ret);
 }
@@ -869,12 +869,12 @@ ReturnCode ESDevice::DIVerify(const ES::TMDReader& tmd, const ES::TicketReader& 
   if (!m_core.FindInstalledTMD(tmd.GetTitleId()).IsValid())
   {
     // Debug log: entering branch where TMD is not yet installed
-    {
-      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
-      File::IOFile log_file(log_path, "ab");
-      if (log_file)
-        log_file.WriteString(fmt::format("[DIVerify] Installing disc TMD for title={:016x}\n", tmd.GetTitleId()));
-    }
+    // {
+      // const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+      // File::IOFile log_file(log_path, "ab");
+      // if (log_file)
+        // log_file.WriteString(fmt::format("[DIVerify] Installing disc TMD for title={:016x}\n", tmd.GetTitleId()));
+    // }
 
     if (const ReturnCode ret = WriteTmdForDiVerify(fs.get(), tmd))
     {

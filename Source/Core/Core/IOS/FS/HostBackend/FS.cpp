@@ -99,9 +99,9 @@ HostFileSystem::HostFilename HostFileSystem::BuildFilename(const std::string& wi
 
       // Debug logging
       
-      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
-      if (File::IOFile log_file{log_path, "ab"})
-        log_file.WriteString(fmt::format("redirect {} -> {}\n", wii_path, hashed_wii_path));
+      // const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+      // if (File::IOFile log_file{log_path, "ab"})
+      //   log_file.WriteString(fmt::format("redirect {} -> {}\n", wii_path, hashed_wii_path));
       return HostFilename{m_root_path + Common::EscapePath(hashed_wii_path), false};
     }
   }
@@ -534,9 +534,9 @@ ResultCode HostFileSystem::CreateFileOrDirectory(Uid uid, Gid gid, const std::st
 
   // Debug log for creation attempt
   {
-    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
-    if (File::IOFile log_file{log_path, "ab"})
-      log_file.WriteString(fmt::format("[CreateFileOrDirectory] attempt path={} host={} is_file={}\n", path, host_path, is_file));
+    // const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    // if (File::IOFile log_file{log_path, "ab"})
+      // log_file.WriteString(fmt::format("[CreateFileOrDirectory] attempt path={} host={} is_file={}\n", path, host_path, is_file));
   }
   FstEntry* parent = GetFstEntryForPath(split_path.parent);
   if (!parent)
@@ -552,9 +552,9 @@ ResultCode HostFileSystem::CreateFileOrDirectory(Uid uid, Gid gid, const std::st
 
   // Debug log for result
   {
-    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
-    if (File::IOFile log_file{log_path, "ab"})
-      log_file.WriteString(fmt::format("[CreateFileOrDirectory] result={} errno={}\n", ok, Common::LastStrerrorString()));
+    // const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    // if (File::IOFile log_file{log_path, "ab"})
+      // log_file.WriteString(fmt::format("[CreateFileOrDirectory] result={} errno={}\n", ok, Common::LastStrerrorString()));
   }
   if (!ok)
   {

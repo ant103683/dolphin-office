@@ -72,8 +72,8 @@ public:
       File::IOFile log_file(log_path, "ab");
       if (log_file)
       {
-        log_file.WriteString(
-            fmt::format("[NandStorage] tid={:016x}, data_dir={}\n", tid, m_data_dir));
+        // log_file.WriteString(
+        //     fmt::format("[NandStorage] tid={:016x}, data_dir={}\n", tid, m_data_dir));
       }
     }
     InitTitleUidAndGid();
@@ -91,7 +91,7 @@ public:
       File::IOFile log_file(log_path, "ab");
       if (log_file)
       {
-        log_file.WriteString(fmt::format("[SaveExists] dir={}, result={}\n", m_data_dir, exists));
+        // log_file.WriteString(fmt::format("[SaveExists] dir={}, result={}\n", m_data_dir, exists));
       }
     }
     return exists;
@@ -188,31 +188,31 @@ public:
       return false;
 
     // ------------- 调试日志 -------------
-    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
-    File::CreateFullPath(log_path);
-    File::IOFile log_file(log_path, "ab");
-    if (log_file)
-    {
-      log_file.WriteString(fmt::format("[WriteFiles] m_data_dir={}\n", m_data_dir));
-      log_file.WriteString(fmt::format("[WriteFiles] incoming files={}\n", files.size()));
-    }
+    // const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    // File::CreateFullPath(log_path);
+    // File::IOFile log_file(log_path, "ab");
+    // if (log_file)
+    // {
+      // log_file.WriteString(fmt::format("[WriteFiles] m_data_dir={}\n", m_data_dir));
+      // log_file.WriteString(fmt::format("[WriteFiles] incoming files={}\n", files.size()));
+    // }
 
      for (const SaveFile& file : files)
      {
       // 再次写入每个条目信息
-      if (log_file)
-      {
-        log_file.WriteString(fmt::format("  - file.path={} type={}\n", file.path,
-                                         file.type == SaveFile::Type::File ? "File" : "Dir"));
-      }
+      // if (log_file)
+      // {
+        // log_file.WriteString(fmt::format("  - file.path={} type={}\n", file.path,
+                                        //  file.type == SaveFile::Type::File ? "File" : "Dir"));
+      // }
 
        const FS::Modes modes = GetFsMode(file.mode);
        const std::string path = m_data_dir + '/' + file.path;
 
-      if (log_file)
-      {
-        log_file.WriteString(fmt::format("    => dest_path={}\n", path));
-      }
+      // if (log_file)
+      // {
+        // log_file.WriteString(fmt::format("    => dest_path={}\n", path));
+      // }
 
        if (file.type == SaveFile::Type::File)
       {

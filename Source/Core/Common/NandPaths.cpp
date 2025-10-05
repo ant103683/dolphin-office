@@ -98,11 +98,11 @@ std::string GetTitleDataPathForGame(u64 title_id, std::optional<FromWhichRoot> f
     {
       if (first_call)
       {
-        log_file.WriteString("==== GetTitleDataPathForGame DEBUG START ====" "\n");
-        log_file.WriteString(fmt::format("hash8={}\n", hash8));
-        first_call = false;
+        // log_file.WriteString("==== GetTitleDataPathForGame DEBUG START ====" "\n");
+        // log_file.WriteString(fmt::format("hash8={}\n", hash8));
+        // first_call = false;
       }
-      log_file.WriteString(fmt::format("[HASH] title={:016x}, path={}\n", title_id, path));
+      // log_file.WriteString(fmt::format("[HASH] title={:016x}, path={}\n", title_id, path));
     }
 
     return path;
@@ -251,8 +251,8 @@ std::vector<std::string> GetAllHash8ForTitle(u64 title_id, std::optional<FromWhi
   File::IOFile log_file(log_path, "ab");
   if (log_file)
   {
-    log_file.WriteString(fmt::format("[GetAllHash8] title={:016x}, count={}, list=[{}]\n", title_id,
-                                     hashes.size(), fmt::join(hashes, ",")));
+    // log_file.WriteString(fmt::format("[GetAllHash8] title={:016x}, count={}, list=[{}]\n", title_id,
+    //                                  hashes.size(), fmt::join(hashes, ",")));
   }
   return hashes;
 }

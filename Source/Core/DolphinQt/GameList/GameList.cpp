@@ -20,6 +20,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <cctype>
 #include <utility>
 
 #include <fmt/format.h>
@@ -45,6 +47,7 @@
 #include "Common/CommonPaths.h"
 #include "Common/Contains.h"
 #include "Common/FileUtil.h"
+#include "Common/NandPaths.h"
 
 #include "Core/Config/MainSettings.h"
 #include "Core/Core.h"
@@ -73,6 +76,9 @@
 #include "DolphinQt/WiiUpdate.h"
 
 #include "UICommon/GameFile.h"
+
+#include "Core/ConfigManager.h"
+#include "Common/IOFile.h"
 
 namespace
 {
@@ -610,8 +616,49 @@ void GameList::ExportWiiSave()
   QList<std::string> failed;
   for (const auto& game : GetSelectedGames())
   {
-    if (WiiSave::Export(game->GetTitleID(), export_dir.toStdString()) !=
-        WiiSave::CopyResult::Success)
+    // Save original save hash so we can restore it later
+    const std::string original_hash8 = SConfig::GetInstance().GetSaveHash8();
+
+    // Attempt to extract an 8-character hexadecimal hash folder from the WiiFS path
+    std::string extracted_hash8;
+    const std::string wii_fs_path = game->GetWiiFSPath();
+    try
+    {
+      std::filesystem::path p(wii_fs_path);
+      if (p.has_parent_path())
+      {
+        const std::string parent = p.parent_path().filename().string();
+        if (parent.size() == 8 && std::all_of(parent.begin(), parent.end(),
+                                              [](unsigned char c) { return std::isxdigit(c); }))
+        {
+          extracted_hash8 = parent;
+        }
+      }
+    }
+    catch (...) {
+      // In case std::filesystem throws (e.g. malformed path), just ignore and fall back
+    }
+
+    // Temporarily set the hash so that WiiSave::Export() looks in the correct directory
+    SConfig::GetInstance().SetSaveHash8(extracted_hash8);
+
+    const WiiSave::CopyResult result =
+        WiiSave::Export(game->GetTitleID(), export_dir.toStdString());
+
+    // Restore original hash value to avoid side-effects on subsequent operations
+    SConfig::GetInstance().SetSaveHash8(original_hash8);
+
+    // Write debug information so the user can inspect which hash was used
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    File::IOFile log_file(log_path, "ab");
+    if (log_file)
+    {
+      log_file.WriteString(fmt::format("[Export] title={:016x}, hash8='{}', result={}\n",
+                                       game->GetTitleID(), extracted_hash8,
+                                       static_cast<int>(result)));
+    }
+
+    if (result != WiiSave::CopyResult::Success)
     {
       failed.push_back(game->GetName(UICommon::GameFile::Variant::LongAndPossiblyCustom));
     }
