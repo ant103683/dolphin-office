@@ -1054,6 +1054,10 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
   }
   break;
 
+  case MessageID::RequestStartGameClient:
+  OnRequestStartGameClient(player);
+  break;
+
   case MessageID::TimeBase:
   {
     u64 timebase = Common::PacketReadU64(packet);
@@ -2546,4 +2550,23 @@ void NetPlayServer::ChunkedDataAbort()
   m_chunked_data_event.Set();
   m_chunked_data_complete_event.Set();
 }
+
+// --- 实现新消息的处理函数 ---
+void NetPlayServer::OnRequestStartGameClient(Client& player)
+{
+
+  // if (m_dialog && m_dialog->IsSharingEnabled())
+  if (m_dialog)
+  {
+    // 如果是共享服务器，允许客户端启动游戏
+    RequestStartGame();
+  }
+  else
+  {
+    // 如果不是共享服务器，忽略请求或发送错误消息
+  }
+
+  // RequestStartGame();
+}
+
 }  // namespace NetPlay

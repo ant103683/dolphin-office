@@ -463,32 +463,72 @@ void NetPlayDialog::OnIndexRefreshFailed(const std::string error)
 
 void NetPlayDialog::OnStart()
 {
-  if (!Settings::Instance().GetNetPlayClient()->DoAllPlayersHaveGame())
+  // 检查当前是主机还是客户端
+  auto server = Settings::Instance().GetNetPlayServer();
+  auto client = Settings::Instance().GetNetPlayClient();
+  bool is_host = false;
+  bool is_client = true;
+  if (server)
   {
-    if (ModalMessageBox::question(
-            this, tr("Warning"),
-            tr("Not all players have the game. Do you really want to start?")) == QMessageBox::No)
+    is_host = true;
+    is_client = false;
+  }
+  if (!client)
+  {
+    is_client = false;
+  }
+
+  if (is_host)
+  {
+    // --- 主机逻辑 (保持大部分不变) ---
+    // 检查是否有玩家没有游戏
+    if (!client->DoAllPlayersHaveGame())
+    {
+      if (ModalMessageBox::question(
+              this, tr("Warning"),
+              tr("Not all players have the game. Do you really want to start?")) == QMessageBox::No)
+        return;
+    }
+
+    // 检查严格同步模式下的自动分辨率
+    if (m_strict_settings_sync_action->isChecked() && Config::Get(Config::GFX_EFB_SCALE) == 0)
+    {
+      ModalMessageBox::critical(
+          this, tr("Error"),
+          tr("Auto internal resolution is not allowed in strict sync mode, as it depends on window "
+             "size.\n\nPlease select a specific internal resolution."));
       return;
-  }
+    }
 
-  if (m_strict_settings_sync_action->isChecked() && Config::Get(Config::GFX_EFB_SCALE) == 0)
+    // 检查游戏文件是否存在 (这个检查可能重复，因为 UpdateGUI 已经检查了)
+    const auto game = FindGameFile(m_current_game_identifier);
+    if (!game)
+    {
+      PanicAlertFmtT("Selected game doesn't exist in game list!");
+      return;
+    }
+
+    // 主机直接请求服务器开始游戏检查流程
+    if (server->RequestStartGame())
+      SetOptionsEnabled(false);  // 启动请求成功后禁用选项
+  }
+  else if (is_client)
   {
-    ModalMessageBox::critical(
-        this, tr("Error"),
-        tr("Auto internal resolution is not allowed in strict sync mode, as it depends on window "
-           "size.\n\nPlease select a specific internal resolution."));
-    return;
-  }
 
-  const auto game = FindGameFile(m_current_game_identifier);
-  if (!game)
-  {
-    PanicAlertFmtT("Selected game doesn't exist in game list!");
-    return;
-  }
+    // --- 客户端逻辑 (新) ---
+    // 客户端向服务器发送启动请求消息
+    sf::Packet request_packet;
+    request_packet << static_cast<u8>(NetPlay::MessageID::RequestStartGameClient);
 
-  if (Settings::Instance().GetNetPlayServer()->RequestStartGame())
-    SetOptionsEnabled(false);
+    // 通过 NetPlayClient 发送给服务器
+    client->SendAsync(std::move(request_packet));
+
+    // 给用户一些反馈
+    DisplayMessage(tr("发送请求:开始游戏..."), "blue");
+    DisplayMessage(tr("如果游戏没有开始，证明该服务器未勾选[客户端开始]，无需继续尝试."), "red");
+    // 暂时禁用开始按钮防止重复点击 (UpdateGUI 会处理)
+    m_start_button->setEnabled(false);
+  }
 }
 
 void NetPlayDialog::reject()
@@ -534,9 +574,9 @@ void NetPlayDialog::show(std::string nickname, bool use_traversal)
 #else
   m_hide_remote_gbas_action->setVisible(false);
 #endif
-  m_start_button->setHidden(!is_hosting);
+  m_start_button->setHidden(false);
   m_kick_button->setHidden(!is_hosting);
-  m_assign_ports_button->setHidden(!is_hosting);
+  m_assign_ports_button->setVisible(true);
   m_room_box->setHidden(!is_hosting);
   m_hostcode_label->setHidden(!is_hosting);
   m_hostcode_action_button->setHidden(!is_hosting);
@@ -850,28 +890,66 @@ void NetPlayDialog::GameStatusChanged(bool running)
 
 void NetPlayDialog::SetOptionsEnabled(bool enabled)
 {
-  if (Settings::Instance().GetNetPlayServer())
+  // Get current state
+  auto server = Settings::Instance().GetNetPlayServer();
+  auto client = Settings::Instance().GetNetPlayClient();
+  bool is_host = server != nullptr;
+   bool is_client = !is_host && client != nullptr; // Client check might be useful elsewhere
+
+  // Start button logic is handled in UpdateGUI
+
+  // Enable/disable options only for the host for most settings
+  m_game_button->setEnabled(enabled && is_host);
+  m_savedata_none_action->setEnabled(enabled && is_host);
+  m_savedata_load_only_action->setEnabled(enabled && is_host);
+  m_savedata_load_and_write_action->setEnabled(enabled && is_host);
+  m_savedata_all_wii_saves_action->setEnabled(enabled && is_host);
+  m_sync_codes_action->setEnabled(enabled && is_host);
+  // m_assign_ports_button->setEnabled(enabled && is_host); // Old logic
+  // Allow Assign Ports button if client exists (either host or client connected) and options are enabled
+  m_assign_ports_button->setEnabled(enabled && client != nullptr);
+  m_strict_settings_sync_action->setEnabled(enabled && is_host);
+  m_host_input_authority_action->setEnabled(enabled && is_host);
+  m_golf_mode_action->setEnabled(enabled && is_host);
+  m_fixed_delay_action->setEnabled(enabled && is_host);
+
+  // Buffer size box logic modification
+  if (is_host)
   {
-    m_start_button->setEnabled(enabled);
-    m_game_button->setEnabled(enabled);
-    m_savedata_none_action->setEnabled(enabled);
-    m_savedata_load_only_action->setEnabled(enabled);
-    m_savedata_load_and_write_action->setEnabled(enabled);
-    m_savedata_all_wii_saves_action->setEnabled(enabled);
-    m_sync_codes_action->setEnabled(enabled);
-    m_assign_ports_button->setEnabled(enabled);
-    m_strict_settings_sync_action->setEnabled(enabled);
-    m_host_input_authority_action->setEnabled(enabled);
-    m_golf_mode_action->setEnabled(enabled);
-    m_fixed_delay_action->setEnabled(enabled);
+    // Host can always see the buffer box.
+    // It's enabled if HIA is OFF (adjusts global buffer) OR if HIA is ON (adjusts host's client-side buffer).
+    m_buffer_size_box->setVisible(true);
+    m_buffer_label->setVisible(true);
+    m_buffer_size_box->setEnabled(true);
+    m_buffer_label->setEnabled(true);
+    m_buffer_label->setText(m_host_input_authority ? tr("Max Buffer:") : tr("Buffer:"));
+  }
+  else if (is_client)
+  {
+    // Client can always see the buffer box to request changes (unless HIA forces a specific client view later).
+    // The actual effect of client's buffer value might be nuanced by HIA, but they can always request.
+    m_buffer_size_box->setVisible(true);
+    m_buffer_label->setVisible(true);
+    m_buffer_size_box->setEnabled(true);
+    m_buffer_label->setEnabled(true);
+    // Label for client should reflect what they are trying to set, server decides actual effect.
+    // OnHostInputAuthorityChanged might update this label further if client's view needs to change under HIA.
+    m_buffer_label->setText(tr("Buffer:")); 
   }
 
+  // Record input is available for everyone (when enabled)
   m_record_input_action->setEnabled(enabled);
 }
 
 void NetPlayDialog::OnMsgStartGame()
 {
-  DisplayMessage(tr("Started game"), "green");
+  auto server = Settings::Instance().GetNetPlayServer();
+  // if (server && dbzUserManager::GetInstance().dbzConfig.is_server)
+  if (server) {
+    DisplayMessage(tr("Started game,Please ignore the server game stop!!!"), "blue");
+  } else {
+    DisplayMessage(tr("Started game"), "green");
+  }
 
   g_netplay_chat_ui =
       std::make_unique<NetPlayChatUI>([this](const std::string& message) { SendMessage(message); });
@@ -882,14 +960,22 @@ void NetPlayDialog::OnMsgStartGame()
   }
 
   QueueOnObject(this, [this] {
-    const auto client = Settings::Instance().GetNetPlayClient();
+    auto client = Settings::Instance().GetNetPlayClient();
+    auto server = Settings::Instance().GetNetPlayServer();
 
     if (client)
     {
-      if (const auto game = FindGameFile(m_current_game_identifier))
+      // if (server && dbzUserManager::GetInstance().dbzConfig.is_server)
+      //   return;
+
+      if (auto game = FindGameFile(m_current_game_identifier))
+      {
         client->StartGame(game->GetFilePath());
+      }
       else
+      {
         PanicAlertFmtT("Selected game doesn't exist in game list!");
+      }
     }
     UpdateDiscordPresence();
   });

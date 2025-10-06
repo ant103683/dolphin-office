@@ -162,6 +162,9 @@ private:
   // returns the PID given
   PlayerId GiveFirstAvailableIDTo(ENetPeer* player);
 
+  // --- 声明新消息的处理函数 ---
+  void OnRequestStartGameClient(Client& player);
+
   NetSettings m_settings;
 
   bool m_is_running = false;
@@ -214,5 +217,8 @@ private:
   Common::TraversalClient* m_traversal_client = nullptr;
   NetPlayUI* m_dialog = nullptr;
   NetPlayIndex m_index;
+
+  // ... existing handlers ...
+  void OnComputeGameDigest(sf::Packet& packet, Client& player);
 };
 }  // namespace NetPlay
