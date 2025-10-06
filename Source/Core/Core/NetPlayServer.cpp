@@ -1055,7 +1055,17 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
   break;
 
   case MessageID::RequestStartGameClient:
-  OnRequestStartGameClient(player);
+  {
+    // if (m_dialog && m_dialog->IsSharingEnabled())
+    if (m_dialog)
+    {
+      OnRequestStartGameClient(player);
+    }
+    else
+    {
+      
+    }
+  }
   break;
 
   case MessageID::TimeBase:
@@ -1128,6 +1138,59 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
     spac << result;
 
     SendToClients(spac);
+  }
+  break;
+
+  case MessageID::REQUEST_PAD_MAPPING_CHANGE_ID: // Ensure this ID matches the one in NetPlayProto.h
+  {
+    INFO_LOG_FMT(NETPLAY, "Received REQUEST_PAD_MAPPING_CHANGE_ID from player {} ({})", player.pid, player.name);
+    PadMappingArray gc_map_from_client;
+    GBAConfigArray gba_cfg_from_client;
+    PadMappingArray wii_map_from_client;
+
+    // Deserialize PadMappingArray (gc_map_from_client)
+    for (PlayerId& mapping : gc_map_from_client)
+    {
+      if (!(packet >> mapping))
+      {
+        WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_PAD_MAPPING_CHANGE_ID too short for GC map (PlayerId) from PID {}.", player.pid);
+        return 1; // Indicate error / disconnect
+      }
+    }
+
+    // Deserialize GBAConfigArray (gba_cfg_from_client)
+    for (GBAConfig& config : gba_cfg_from_client)
+    {
+      if (!(packet >> config.enabled >> config.has_rom >> config.title))
+      {
+        WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_PAD_MAPPING_CHANGE_ID too short for GBA config (metadata) from PID {}.", player.pid);
+        return 1; // Indicate error / disconnect
+      }
+      for (u8& hash_byte : config.hash)
+      {
+        if (!(packet >> hash_byte))
+        {
+          WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_PAD_MAPPING_CHANGE_ID too short for GBA config (hash) from PID {}.", player.pid);
+          return 1; // Indicate error / disconnect
+        }
+      }
+    }
+
+    // Deserialize PadMappingArray (wii_map_from_client)
+    for (PlayerId& mapping : wii_map_from_client)
+    {
+      if (!(packet >> mapping))
+      {
+        WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_PAD_MAPPING_CHANGE_ID too short for Wii map (PlayerId) from PID {}.", player.pid);
+        return 1; // Indicate error / disconnect
+      }
+    }
+
+    // TODO: Validate the data if necessary (e.g., PIDs are valid)
+    SetPadMapping(gc_map_from_client);
+    SetGBAConfig(gba_cfg_from_client, true); // Assuming 'true' triggers broadcast
+    SetWiimoteMapping(wii_map_from_client);
+    // The Set... methods should already handle broadcasting the update to all clients.
   }
   break;
 

@@ -336,11 +336,54 @@ void NetPlayDialog::ConnectWidgets()
     Settings::Instance().GetNetPlayServer()->KickPlayer(id);
   });
   connect(m_assign_ports_button, &QPushButton::clicked, [this] {
-    m_pad_mapping->exec();
+    // SetQWidgetWindowDecorations(m_pad_mapping);
 
-    Settings::Instance().GetNetPlayServer()->SetPadMapping(m_pad_mapping->GetGCPadArray());
-    Settings::Instance().GetNetPlayServer()->SetGBAConfig(m_pad_mapping->GetGBAArray(), true);
-    Settings::Instance().GetNetPlayServer()->SetWiimoteMapping(m_pad_mapping->GetWiimoteArray());
+    // Correctly initialize client and server as per the analyzed code structure
+    auto client = Settings::Instance().GetNetPlayClient();
+    auto server = Settings::Instance().GetNetPlayServer();
+
+    if (!client)
+    {
+      // This case should ideally not happen if the dialog is active
+      DisplayMessage(tr("NetPlay client is not available."), "red");
+      return;
+    }
+
+    // 1. Fetch current mappings and players from the client
+    // Ensure these methods exist and are const-correct in NetPlayClient.h
+    // Assumes NetPlayClient.h and NetPlaySettings.h (or equivalent) are included for these types.
+    const NetPlay::PadMappingArray& current_gc_maps = client->GetPadMapping();
+    const NetPlay::GBAConfigArray& current_gba_config = client->GetGBAConfig();
+    const NetPlay::PadMappingArray& current_wii_maps = client->GetWiimoteMapping();
+    const auto& players = client->GetPlayers(); // Changed to auto& to match typical usage if GetPlayers returns by const ref
+
+    // 2. Pass initial data to PadMappingDialog instance
+    // Ensure m_pad_mapping->SetInitialData can accept const auto& for players or std::vector<const NetPlay::Player*>
+    m_pad_mapping->SetInitialData(current_gc_maps, current_gba_config, current_wii_maps, players);
+
+    // 3. Execute the dialog
+    if (m_pad_mapping->exec() == QDialog::Accepted)
+    {
+      // 4. User clicked "OK", get new mapping settings from the dialog
+      NetPlay::PadMappingArray new_gc_maps = m_pad_mapping->GetGCPadArray();
+      NetPlay::GBAConfigArray new_gba_config = m_pad_mapping->GetGBAArray();
+      NetPlay::PadMappingArray new_wii_maps = m_pad_mapping->GetWiimoteArray();
+
+      // 5. Act based on whether this instance is hosting or is a client
+      if (IsHosting() && server)
+      {
+        // Host: Apply changes directly using NetPlayServer methods
+        server->SetPadMapping(new_gc_maps);
+        server->SetGBAConfig(new_gba_config, true); // Assuming 'true' might imply broadcast or apply
+        server->SetWiimoteMapping(new_wii_maps);
+      }
+      else if (client) // Added explicit check for client before calling its method
+      {
+        // Client: Send a request to the server to change mappings
+        DisplayMessage(tr("发送请求:控制器映射更改..."), "blue");
+        client->RequestPadMappingChange(new_gc_maps, new_gba_config, new_wii_maps);
+      }
+    }
   });
 
   // Chat

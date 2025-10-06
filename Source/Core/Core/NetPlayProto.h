@@ -192,6 +192,9 @@ enum class MessageID : u8
 
   SyncSaveData = 0xF1,
   SyncCodes = 0xF2,
+
+  REQUEST_PAD_MAPPING_CHANGE_ID = 0x58,
+
 };
 
 enum class ConnectionError : u8

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "Core/NetPlayClient.h"
+#include "Core/NetPlayProto.h" // For REQUEST_PAD_MAPPING_CHANGE_ID and NetPlay::Packet etc.
+
 
 #include <algorithm>
 #include <array>
@@ -2764,6 +2766,50 @@ void NetPlay_Disable()
   std::lock_guard lk(crit_netplay_client);
   netplay_client = nullptr;
 }
+
+void NetPlayClient::RequestPadMappingChange(const PadMappingArray& gc_map,
+                                            const GBAConfigArray& gba_cfg,
+                                            const PadMappingArray& wii_map)
+{
+  if (!IsConnected())
+  {
+    WARN_LOG_FMT(NETPLAY, "Not connected, cannot send pad mapping change request.");
+    return;
+  }
+
+  sf::Packet packet;
+  // Ensure NetPlay::MessageID::REQUEST_PAD_MAPPING_CHANGE_ID is defined and accessible.
+  packet << static_cast<u8>(NetPlay::MessageID::REQUEST_PAD_MAPPING_CHANGE_ID);
+
+  // Manually serialize PadMappingArray (gc_map)
+  for (const PlayerId& mapping : gc_map)
+  {
+    packet << mapping;
+  }
+
+  // Manually serialize GBAConfigArray (gba_cfg)
+  for (const GBAConfig& config : gba_cfg)
+  {
+    packet << config.enabled;
+    packet << config.has_rom;
+    packet << config.title; // sf::Packet supports std::string
+    for (const u8& hash_byte : config.hash) // GBAConfig::hash is std::array<u8, 20>
+    {
+      packet << hash_byte;
+    }
+  }
+
+  // Manually serialize PadMappingArray (wii_map)
+  for (const PlayerId& mapping : wii_map)
+  {
+    packet << mapping;
+  }
+
+  // Send the packet using the class's SendAsync method
+  SendAsync(std::move(packet)); 
+  INFO_LOG_FMT(NETPLAY, "Sent pad mapping change request to server.");
+}
+
 }  // namespace NetPlay
 
 // stuff hacked into dolphin
