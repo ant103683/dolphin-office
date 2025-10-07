@@ -181,6 +181,7 @@ public:
 
   void RequestPadMappingChange(const PadMappingArray& gc_map, const GBAConfigArray& gba_cfg,
                                const PadMappingArray& wii_map);
+  void RequestBufferChange(int new_buffer_value);
 
 protected:
   struct AsyncQueueEntry

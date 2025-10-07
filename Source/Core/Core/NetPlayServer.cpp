@@ -1194,6 +1194,32 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
   }
   break;
 
+  case MessageID::REQUEST_BUFFER_CHANGE_ID:
+  {
+    s32 requested_buffer_value;
+    // Check if there's enough data for s32
+    if (packet.getReadPosition() + sizeof(s32) > packet.getDataSize()) {
+        WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_BUFFER_CHANGE_ID too short to contain buffer value from PID {}.", player.pid);
+        return 1; // Indicate error / disconnect client
+    }
+    if (!(packet >> requested_buffer_value)) {
+        WARN_LOG_FMT(NETPLAY, "Failed to deserialize buffer value from REQUEST_BUFFER_CHANGE_ID (PID: {}).", player.pid);
+        return 1; // Indicate error / disconnect client
+    }
+
+    INFO_LOG_FMT(NETPLAY, "Player PID {} ({}) requested buffer change to: {}", player.pid, player.name, requested_buffer_value);
+    
+    // As per user request, skipping min/max validation if not already part of AdjustPadBufferSize.
+    // AdjustPadBufferSize takes unsigned int.
+    if (requested_buffer_value < 0) {
+        WARN_LOG_FMT(NETPLAY, "Player PID {} ({}) requested negative buffer value {}. Clamping to 0.", player.pid, player.name, requested_buffer_value);
+        requested_buffer_value = 0;
+    }
+    this->AdjustPadBufferSize(static_cast<unsigned int>(requested_buffer_value));
+    // AdjustPadBufferSize will handle broadcasting if not in HIA mode.
+  }
+  break;
+
   case MessageID::GameDigestError:
   {
     std::string error;

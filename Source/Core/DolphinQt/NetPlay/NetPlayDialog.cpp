@@ -394,15 +394,32 @@ void NetPlayDialog::ConnectWidgets()
 
   // Other
   connect(m_buffer_size_box, &QSpinBox::valueChanged, [this](int value) {
-    if (value == m_buffer_size)
+    if (value == m_buffer_size) // m_buffer_size is updated by OnPadBufferChanged
       return;
 
-    const auto client = Settings::Instance().GetNetPlayClient();
-    const auto server = Settings::Instance().GetNetPlayServer();
-    if (server && !m_host_input_authority)
-      server->AdjustPadBufferSize(value);
-    else
-      client->AdjustPadBufferSize(value);
+    auto client = Settings::Instance().GetNetPlayClient();
+    auto server = Settings::Instance().GetNetPlayServer();
+
+    if (!client) // Should not happen if UI is active
+      return;
+
+    if (server && IsHosting()) // Current user is the HOST
+    {
+      if (!m_host_input_authority) // Host, and NOT HostInputAuthority mode
+      {
+        server->AdjustPadBufferSize(value);
+      }
+      else // Host, AND HostInputAuthority mode (Host adjusts its own client-side buffer)
+      {
+        client->AdjustPadBufferSize(value);
+      }
+    }
+    else // Current user is a CLIENT (not hosting)
+    {
+      // Client requests buffer change from server (regardless of HIA mode from client's perspective for request)
+      // The server will decide how to handle it based on its HIA state.
+      client->RequestBufferChange(value);
+    }
   });
 
   const auto hia_function = [this](bool enable) {
@@ -1080,12 +1097,11 @@ void NetPlayDialog::OnHostInputAuthorityChanged(bool enabled)
 
   QueueOnObject(this, [this, enabled] {
     const bool is_hosting = IsHosting();
-    const bool enable_buffer = is_hosting != enabled;
 
     if (is_hosting)
     {
-      m_buffer_size_box->setEnabled(enable_buffer);
-      m_buffer_label->setEnabled(enable_buffer);
+      m_buffer_size_box->setEnabled(true);
+      m_buffer_label->setEnabled(true);
       m_buffer_size_box->setHidden(false);
       m_buffer_label->setHidden(false);
     }
@@ -1093,8 +1109,8 @@ void NetPlayDialog::OnHostInputAuthorityChanged(bool enabled)
     {
       m_buffer_size_box->setEnabled(true);
       m_buffer_label->setEnabled(true);
-      m_buffer_size_box->setHidden(!enable_buffer);
-      m_buffer_label->setHidden(!enable_buffer);
+      m_buffer_size_box->setHidden(false);
+      m_buffer_label->setHidden(false);
     }
 
     m_buffer_label->setText(enabled ? tr("Max Buffer:") : tr("Buffer:"));
@@ -1172,8 +1188,8 @@ void NetPlayDialog::OnGolferChanged(const bool is_golfer, const std::string& gol
   if (m_host_input_authority)
   {
     QueueOnObject(this, [this, is_golfer] {
-      m_buffer_size_box->setEnabled(!is_golfer);
-      m_buffer_label->setEnabled(!is_golfer);
+      m_buffer_size_box->setEnabled(true);
+      m_buffer_label->setEnabled(true);
     });
   }
 

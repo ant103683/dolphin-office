@@ -2810,6 +2810,21 @@ void NetPlayClient::RequestPadMappingChange(const PadMappingArray& gc_map,
   INFO_LOG_FMT(NETPLAY, "Sent pad mapping change request to server.");
 }
 
+void NetPlayClient::RequestBufferChange(int new_buffer_value)
+{
+  if (!m_server || !m_server->host)
+    return;
+
+  sf::Packet packet;
+  // The message ID should be NetPlay::MessageID::REQUEST_BUFFER_CHANGE_ID
+  // Ensure NetPlay::MessageID is accessible here or use the correct scope/enum.
+  // Assuming MessageID is an enum class defined in NetPlay namespace or globally accessible
+  packet << static_cast<u8>(NetPlay::MessageID::REQUEST_BUFFER_CHANGE_ID); // Corrected: Cast to u8
+  packet << static_cast<s32>(new_buffer_value);
+  Send(packet); // Assuming Send is a member function that takes sf::Packet by const reference or value
+  INFO_LOG_FMT(NETPLAY, "Sent buffer change request to server: new_buffer_value = {}", new_buffer_value); // Corrected: Use {} for fmt
+}
+
 }  // namespace NetPlay
 
 // stuff hacked into dolphin
