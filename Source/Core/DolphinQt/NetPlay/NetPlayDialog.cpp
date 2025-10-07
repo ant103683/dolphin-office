@@ -1015,7 +1015,7 @@ void NetPlayDialog::SetOptionsEnabled(bool enabled)
 void NetPlayDialog::OnMsgStartGame()
 {
   auto server = Settings::Instance().GetNetPlayServer();
-  // if (server && dbzUserManager::GetInstance().dbzConfig.is_server)
+  // if (server && dbzUserManager::GetInstance().dbzConfig.is_server) {
   if (server) {
     DisplayMessage(tr("Started game,Please ignore the server game stop!!!"), "blue");
   } else {
@@ -1036,8 +1036,8 @@ void NetPlayDialog::OnMsgStartGame()
 
     if (client)
     {
-      // if (server && dbzUserManager::GetInstance().dbzConfig.is_server)
-      //   return;
+      if (server)
+        return;
 
       if (auto game = FindGameFile(m_current_game_identifier))
       {
