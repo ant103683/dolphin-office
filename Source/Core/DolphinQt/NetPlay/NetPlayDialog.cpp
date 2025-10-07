@@ -568,7 +568,7 @@ void NetPlayDialog::OnStart()
 
     // 给用户一些反馈
     DisplayMessage(tr("发送请求:开始游戏..."), "blue");
-    DisplayMessage(tr("如果游戏没有开始，证明该服务器未勾选[客户端开始]，无需继续尝试."), "red");
+    // DisplayMessage(tr("如果游戏没有开始，证明该服务器未勾选[客户端开始]，无需继续尝试."), "red");
     // 暂时禁用开始按钮防止重复点击 (UpdateGUI 会处理)
     m_start_button->setEnabled(false);
   }
@@ -698,6 +698,17 @@ void NetPlayDialog::UpdateGUI()
   const auto server = Settings::Instance().GetNetPlayServer();
   if (!client)
     return;
+
+  bool game_selected = !m_current_game_name.empty();  // 假设 GetGameID() 返回 std::string
+  bool game_running = Core::GetState(Core::System::GetInstance()) != Core::State::Uninitialized;
+
+  if (server) {
+    game_running = server->IsRunning() || server->IsStartPending();
+  }
+  
+  // Allow start if game selected and not running, for both host and client
+  bool game_can_start = game_selected && !game_running;
+  m_start_button->setEnabled(game_can_start);
 
   // Update Player List
   const auto players = client->GetPlayers();

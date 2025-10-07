@@ -220,5 +220,9 @@ private:
 
   // ... existing handlers ...
   void OnComputeGameDigest(sf::Packet& packet, Client& player);
+
+public:
+  bool IsRunning() const { return m_is_running; }
+  bool IsStartPending() const { return m_start_pending; }
 };
 }  // namespace NetPlay
