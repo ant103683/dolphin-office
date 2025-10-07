@@ -67,6 +67,8 @@
 #include "VideoCommon/NetPlayGolfUI.h"
 #include "VideoCommon/VideoConfig.h"
 
+#define SERVER_SWITCH 0
+
 namespace
 {
 QString InetAddressToString(const Common::TraversalInetAddress& addr)
@@ -1016,11 +1018,20 @@ void NetPlayDialog::OnMsgStartGame()
 {
   auto server = Settings::Instance().GetNetPlayServer();
   // if (server && dbzUserManager::GetInstance().dbzConfig.is_server) {
-  if (server) {
+
+#ifdef SERVER_SWITCH
+  if (server) 
     DisplayMessage(tr("Started game,Please ignore the server game stop!!!"), "blue");
-  } else {
+#else
+  if (!server) 
     DisplayMessage(tr("Started game"), "green");
-  }
+#endif
+
+  // if (SERVER_SWITCH && server) {
+  //   DisplayMessage(tr("Started game,Please ignore the server game stop!!!"), "blue");
+  // } else {
+  //   DisplayMessage(tr("Started game"), "green");
+  // }
 
   g_netplay_chat_ui =
       std::make_unique<NetPlayChatUI>([this](const std::string& message) { SendMessage(message); });
@@ -1036,8 +1047,10 @@ void NetPlayDialog::OnMsgStartGame()
 
     if (client)
     {
+#if SERVER_SWITCH
       if (server)
         return;
+#endif
 
       if (auto game = FindGameFile(m_current_game_identifier))
       {
