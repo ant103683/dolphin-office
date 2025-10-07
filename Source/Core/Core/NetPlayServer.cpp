@@ -821,7 +821,8 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
       // then disconnect them.
       if (m_pad_map.at(map) != player.pid)
       {
-        return 1;
+        // return 1;
+        break;
       }
 
       GCPadStatus pad;

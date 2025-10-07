@@ -980,7 +980,7 @@ void NetPlayDialog::SetOptionsEnabled(bool enabled)
   m_sync_codes_action->setEnabled(enabled && is_host);
   // m_assign_ports_button->setEnabled(enabled && is_host); // Old logic
   // Allow Assign Ports button if client exists (either host or client connected) and options are enabled
-  m_assign_ports_button->setEnabled(enabled && client != nullptr);
+  // m_assign_ports_button->setEnabled(enabled && client != nullptr);
   m_strict_settings_sync_action->setEnabled(enabled && is_host);
   m_host_input_authority_action->setEnabled(enabled && is_host);
   m_golf_mode_action->setEnabled(enabled && is_host);
