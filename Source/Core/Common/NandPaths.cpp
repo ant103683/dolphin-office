@@ -78,36 +78,54 @@ std::string GetTitleDataPathForGame(u64 title_id, std::optional<FromWhichRoot> f
 {
   const std::string base = GetTitlePath(title_id, from);
   const std::string& hash8 = SConfig::GetInstance().GetSaveHash8();
+
+  
+  // Path that will ultimately be returned by this function.
+  std::string resolved_path;
+
   if (!hash8.empty())
   {
     // Construct path including the hash folder
-    std::string path = fmt::format("{}/{}/data", base, hash8);
+    resolved_path = fmt::format("{}/{}/data", base, hash8);
 
     // Collapse accidental duplicate hash segment, e.g. /hash8/hash8/data → /hash8/data
     const std::string duplicate = "/" + hash8 + "/" + hash8 + "/";
     const std::string single = "/" + hash8 + "/";
-    const size_t dup_pos = path.find(duplicate);
+    const size_t dup_pos = resolved_path.find(duplicate);
     if (dup_pos != std::string::npos)
-      path.replace(dup_pos, duplicate.length(), single);
-
-    // Debug: append information to logs/savehash8.txt
-    static bool first_call = true;
-    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
-    File::IOFile log_file(log_path, "ab");
-    if (log_file)
-    {
-      if (first_call)
-      {
-        // log_file.WriteString("==== GetTitleDataPathForGame DEBUG START ====" "\n");
-        // log_file.WriteString(fmt::format("hash8={}\n", hash8));
-        // first_call = false;
-      }
-      // log_file.WriteString(fmt::format("[HASH] title={:016x}, path={}\n", title_id, path));
-    }
-
-    return path;
+      resolved_path.replace(dup_pos, duplicate.length(), single);
   }
-  return base + "/data";
+  else
+  {
+    resolved_path = base + "/data";
+  }
+
+  // ------------------------------------------------------------
+  // Debug logging block – writes out detailed information about
+  // every invocation of this function into User/Logs/savehash8.txt.
+  // Each line is prefixed with "[NPDEBUG]" so that the caller can
+  // easily filter out logs from previous runs.
+  // ------------------------------------------------------------
+  const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+  File::CreateFullPath(log_path);
+  File::IOFile log_file(log_path, "ab");
+  if (log_file)
+  {
+    static bool s_header_written = false;
+    if (!s_header_written)
+    {
+      const std::string header = fmt::format("[NPDEBUG] ===== New NetPlay debug session =====\n");
+      log_file.WriteBytes(header.data(), header.size());
+      s_header_written = true;
+    }
+    const std::string line = fmt::format(
+        "[NPDEBUG] GetTitleDataPathForGame: title_id={:016x}, hash8='{}', resolved_path='{}'\n",
+        title_id, hash8, resolved_path);
+    log_file.WriteBytes(line.data(), line.size());
+  }
+  // ------------------------------------------------------------
+
+  return resolved_path;
 }
 
 std::string GetTitleContentPath(u64 title_id, std::optional<FromWhichRoot> from)
@@ -246,13 +264,17 @@ std::vector<std::string> GetAllHash8ForTitle(u64 title_id, std::optional<FromWhi
         }))
       hashes.push_back(name);
   }
+
+  // Debug logging for hash8 enumeration
   const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
   File::CreateFullPath(log_path);
   File::IOFile log_file(log_path, "ab");
   if (log_file)
   {
-    // log_file.WriteString(fmt::format("[GetAllHash8] title={:016x}, count={}, list=[{}]\n", title_id,
-    //                                  hashes.size(), fmt::join(hashes, ",")));
+    const std::string line = fmt::format(
+        "[NPDEBUG] GetAllHash8ForTitle: title_id={:016x}, hash_count={}, list=[{}]\n", title_id,
+        hashes.size(), fmt::join(hashes, ","));
+    log_file.WriteBytes(line.data(), line.size());
   }
   return hashes;
 }

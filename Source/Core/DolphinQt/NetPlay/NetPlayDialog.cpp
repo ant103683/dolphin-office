@@ -67,7 +67,7 @@
 #include "VideoCommon/NetPlayGolfUI.h"
 #include "VideoCommon/VideoConfig.h"
 
-#define SERVER_SWITCH 0
+#define SERVER_SWITCH 1
 
 namespace
 {

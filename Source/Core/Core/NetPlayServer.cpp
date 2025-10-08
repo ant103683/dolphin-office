@@ -29,6 +29,7 @@
 #include "Common/MsgHandler.h"
 #include "Common/SFMLHelper.h"
 #include "Common/StringUtil.h"
+#include "Common/Crypto/SHA1.h"
 #include "Common/UPnP.h"
 #include "Common/Version.h"
 
@@ -1401,6 +1402,16 @@ bool NetPlayServer::ChangeGame(const SyncIdentifier& sync_identifier,
 
   m_selected_game_identifier = sync_identifier;
   m_selected_game_name = netplay_name;
+
+  // Compute and set SaveHash8 early so that server-only host (not entering game)
+  // can still resolve correct NAND save paths for Wii titles.
+  const std::string hash_str = Common::SHA1::DigestToString(sync_identifier.sync_hash);
+  const std::string hash8 = hash_str.substr(0, 8);
+  SConfig::GetInstance().SetSaveHash8(hash8);
+
+  // Debug logging similar to previous instrumentation
+  const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+  File::WriteStringToFile(log_path, "[NPDEBUG] ChangeGame set SaveHash8=" + hash8 + "\n");
 
   // send changed game to clients
   sf::Packet spac;

@@ -12436,7 +12436,7 @@ msgstr "踢除玩家"
 
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:295
 msgid "Assign Controller Ports"
-msgstr "指定控制器端口"
+msgstr "分配玩家端口"
 
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:407
 msgid "Stopped game"
@@ -12788,7 +12788,7 @@ msgstr "GBA 端口 %1"
 
 #: Source/Core/DolphinQt/NetPlay/PadMappingDialog.cpp:37
 msgid "GC Port %1"
-msgstr "GC 端口 %1"
+msgstr "玩家 %1"
 
 #: Source/Core/DolphinQt/NKitWarningDialog.cpp:30
 msgid "NKit Warning"
