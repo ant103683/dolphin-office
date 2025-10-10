@@ -818,13 +818,33 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
       PadIndex map;
       packet >> map;
 
-      // If the data is not from the correct player,
-      // then disconnect them.
+      // 如果发现控制器映射与玩家 PID 不匹配，则进入「宽限 N 帧」容错逻辑。
+      // N 固定为 22 帧，来源：N = 最大 PadBuffer(10) + ceil(最差往返 RTT 100 ms / 16.7 ms)≈6 + 预留安全裕度 6 = 22。
+      // 在宽限期内允许旧映射的 PadData 继续通过，避免端口映射修改瞬间导致死锁。
       if (m_pad_map.at(map) != player.pid)
       {
+        if (m_pad_mapping_grace_counter < PAD_MAPPING_GRACE_FRAMES)
+        {
+          ++m_pad_mapping_grace_counter; // 计数并忽略此次不匹配
+          continue;                      // 继续处理后续 PadData（如果有）
+        }
+        // 超过宽限期仍不匹配，视为异常，跳出处理逻辑（可改为断开连接）。
         // return 1;
         break;
       }
+      else
+      {
+        // 映射再次匹配，重置计数器，准备下一次端口映射变更。
+        m_pad_mapping_grace_counter = 0;
+      }
+
+      // If the data is not from the correct player,
+      // then disconnect them.
+      // if (m_pad_map.at(map) != player.pid)
+      // {
+      //   // return 1;
+      //   break;
+      // }
 
       GCPadStatus pad;
       packet >> pad.button;
