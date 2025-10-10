@@ -819,41 +819,41 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
       packet >> map;
 
       // 如果发现控制器映射与玩家 PID 不匹配，则进入「宽限 N 帧」容错逻辑。
-      // N 固定为 22 帧，来源：N = 最大 PadBuffer(10) + ceil(最差往返 RTT 100 ms / 16.7 ms)≈6 + 预留安全裕度 6 = 22。
-      // 在宽限期内允许旧映射的 PadData 继续通过，避免端口映射修改瞬间导致死锁。
-      if (m_pad_map.at(map) != player.pid)
-      {
-        if (m_pad_mapping_grace_counter < PAD_MAPPING_GRACE_FRAMES)
-        {
-          ++m_pad_mapping_grace_counter; // 计数并忽略此次不匹配
-          continue;                      // 继续处理后续 PadData（如果有）
-        }
-        // 超过宽限期仍不匹配，视为异常，跳出处理逻辑（可改为断开连接）。
-        // return 1;
-        break;
-      }
-      else
-      {
-        // 映射再次匹配，重置计数器，准备下一次端口映射变更。
-        m_pad_mapping_grace_counter = 0;
-      }
+      // N = 22 帧（约 0.37 s）以涵盖 PadBuffer 深度与网络 RTT 抖动。
+      const bool mapping_match = (m_pad_map.at(map) == player.pid);
 
-      // If the data is not from the correct player,
-      // then disconnect them.
-      // if (m_pad_map.at(map) != player.pid)
-      // {
-      //   // return 1;
-      //   break;
-      // }
-
+      // 先无条件读取完整 PadData，保证 packet 对齐
       GCPadStatus pad;
       packet >> pad.button;
-      spac << map << pad.button;
       if (!m_gba_config.at(map).enabled)
       {
         packet >> pad.analogA >> pad.analogB >> pad.stickX >> pad.stickY >> pad.substickX >>
             pad.substickY >> pad.triggerLeft >> pad.triggerRight >> pad.isConnected;
+      }
 
+      if (!mapping_match)
+      {
+        if (m_pad_mapping_grace_counter < PAD_MAPPING_GRACE_FRAMES)
+        {
+          ++m_pad_mapping_grace_counter; // 仍在宽限期 —— 继续转发，避免卡顿
+        }
+        else
+        {
+          // 超过宽限期仍不匹配，认为客户端未按要求切换端口；终止处理本条消息
+          WARN_LOG_FMT(NETPLAY, "Pad mapping mismatch beyond grace period (map {} expect {}, got {}).", static_cast<int>(map), m_pad_map.at(map), player.pid);
+          break;
+        }
+      }
+      else
+      {
+        // 匹配正确，重置计数器
+        m_pad_mapping_grace_counter = 0;
+      }
+
+      // 无论是否处于宽限期，只要没有超期，都把 PadData 转发给其他客户端
+      spac << map << pad.button;
+      if (!m_gba_config.at(map).enabled)
+      {
         spac << pad.analogA << pad.analogB << pad.stickX << pad.stickY << pad.substickX
              << pad.substickY << pad.triggerLeft << pad.triggerRight << pad.isConnected;
       }
