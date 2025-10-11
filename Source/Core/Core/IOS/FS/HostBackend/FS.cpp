@@ -4,7 +4,10 @@
 #include "Core/IOS/FS/HostBackend/FS.h"
 
 #include <algorithm>
+#include <cstring>
 #include <cmath>
+
+#include "Core/ConfigManager.h"
 #include <optional>
 #include <string_view>
 #include <type_traits>
@@ -43,6 +46,67 @@ HostFileSystem::HostFilename HostFileSystem::BuildFilename(const std::string& wi
     }
   }
 
+  // Hash-based save redirection for game titles (00010000)
+  // If a per-game hash has been configured, we insert it as an extra subdirectory between the
+  // title ID and the remaining path (typically "/data" and its children).  This keeps the logical
+  // Wii path unchanged while storing the data in a unique host directory.
+  const SConfig* cfg = SConfig::GetInstancePtr();
+  if (cfg)
+  {
+    const std::string& hash8 = cfg->GetSaveHash8();
+    if (!hash8.empty() && wii_path.starts_with("/title/00010000/"))
+  {
+    // Split the Wii path into components.
+    const size_t third_sep = wii_path.find('/', std::strlen("/title/00010000/"));
+    if (third_sep != std::string::npos)
+    {
+      const std::string prefix = wii_path.substr(0, third_sep);      // /title/00010000/<tid>
+      const std::string remainder = wii_path.substr(third_sep);      // e.g. /data/...
+
+      // Avoid duplicating the hash directory if it is already present just after the title ID.
+      const size_t next_sep = remainder.find('/', 1);                // skip leading '/'
+      const std::string_view first_component =
+          next_sep != std::string::npos ? std::string_view(remainder).substr(1, next_sep - 1)
+                                        : std::string_view(remainder).substr(1);
+      if (first_component == hash8)
+      {
+        // The incoming path is already redirecting to the hash directory; return as-is.
+        const std::string host_existing = m_root_path + Common::EscapePath(wii_path);
+        return HostFilename{host_existing, false};
+      }
+
+      const std::string hashed_wii_path = fmt::format("{}/{}/{}", prefix, hash8, remainder.substr(1));
+      const std::string host_old = m_root_path + Common::EscapePath(wii_path);
+      const std::string host_new = m_root_path + Common::EscapePath(hashed_wii_path);
+
+      // Perform one-time migration for the base "/data" directory so that legacy saves are moved
+      // into the new hash directory.  We only create the parent directory (…/<tid>/<hash>) before
+      // attempting the rename; creating the destination itself would make the rename fail.
+      if (!File::Exists(host_new) && File::Exists(host_old))
+      {
+        const std::string host_new_parent = host_new.substr(0, host_new.find_last_of("/\\"));
+        File::CreateFullPath(host_new_parent + '/');
+
+        if (!File::Rename(host_old, host_new))
+        {
+          // If rename fails (e.g. cross-device), fall back to recursive copy + delete.
+          if (File::Copy(host_old, host_new, true))
+            File::DeleteDirRecursively(host_old);
+          else
+            ERROR_LOG_FMT(IOS_FS, "Save migration failed from {} to {}", host_old, host_new);
+        }
+      }
+
+      // Debug logging
+      
+      // const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+      // if (File::IOFile log_file{log_path, "ab"})
+      //   log_file.WriteString(fmt::format("redirect {} -> {}\n", wii_path, hashed_wii_path));
+      return HostFilename{m_root_path + Common::EscapePath(hashed_wii_path), false};
+    }
+  }
+  }
+  
   ASSERT(!m_root_path.empty());
 
   if (wii_path.starts_with("/"))
@@ -468,6 +532,12 @@ ResultCode HostFileSystem::CreateFileOrDirectory(Uid uid, Gid gid, const std::st
   const auto split_path = SplitPathAndBasename(path);
   const std::string host_path = BuildFilename(path).host_path;
 
+  // Debug log for creation attempt
+  {
+    // const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    // if (File::IOFile log_file{log_path, "ab"})
+      // log_file.WriteString(fmt::format("[CreateFileOrDirectory] attempt path={} host={} is_file={}\n", path, host_path, is_file));
+  }
   FstEntry* parent = GetFstEntryForPath(split_path.parent);
   if (!parent)
     return ResultCode::NotFound;
@@ -478,7 +548,14 @@ ResultCode HostFileSystem::CreateFileOrDirectory(Uid uid, Gid gid, const std::st
   if (File::Exists(host_path))
     return ResultCode::AlreadyExists;
 
-  const bool ok = is_file ? File::CreateEmptyFile(host_path) : File::CreateDir(host_path);
+  const bool ok = is_file ? File::CreateEmptyFile(host_path) : File::CreateDirs(host_path);
+
+  // Debug log for result
+  {
+    // const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    // if (File::IOFile log_file{log_path, "ab"})
+      // log_file.WriteString(fmt::format("[CreateFileOrDirectory] result={} errno={}\n", ok, Common::LastStrerrorString()));
+  }
   if (!ok)
   {
     ERROR_LOG_FMT(IOS_FS, "Failed to create file or directory: {}", host_path);

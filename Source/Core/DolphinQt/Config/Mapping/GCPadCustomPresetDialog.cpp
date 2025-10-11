@@ -226,5 +226,3 @@ void GCPadCustomPresetDialog::Save()
 
   accept();
 }
-
-// #include "moc_GCPadCustomPresetDialog.cpp"

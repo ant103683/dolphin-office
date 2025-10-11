@@ -30,6 +30,7 @@
 #include "Common/NandPaths.h"
 #include "Common/StringUtil.h"
 #include "Common/Version.h"
+#include "Common/Crypto/SHA1.h"
 
 #include "Core/AchievementManager.h"
 #include "Core/Boot/Boot.h"
@@ -331,6 +332,24 @@ struct SetGameMetadata
     system.SetIsTriforce(disc.volume->GetVolumeType() == DiscIO::Platform::Triforce);
     config->m_disc_booted_from_game_list = true;
     config->SetRunningGameMetadata(*disc.volume, disc.volume->GetGamePartition());
+
+    // Compute and store save hash8 for Wii titles
+    if (disc.volume->GetVolumeType() == DiscIO::Platform::WiiDisc)
+    {
+      const auto hash = disc.volume->GetSyncHash();
+      const std::string hash_str = Common::SHA1::DigestToString(hash);
+      const std::string hash8 = hash_str.substr(0, 8);
+      config->SetSaveHash8(hash8);
+
+      // Debug: write hash8 to a log file for verification
+      // const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+      // File::WriteStringToFile(log_path, hash8 + "\n");
+
+    }
+    else
+    {
+      config->SetSaveHash8("");
+    }
     return true;
   }
 
@@ -570,4 +589,10 @@ std::string SConfig::GetGameTDBImageRegionCode(bool wii, DiscIO::Region region) 
   default:
     return "EN";
   }
+}
+
+const std::string& SConfig::GetSaveHash8() const
+{
+  std::lock_guard<std::recursive_mutex> lock(m_metadata_lock);
+  return m_save_hash8;
 }

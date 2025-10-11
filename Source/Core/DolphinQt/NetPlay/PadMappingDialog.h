@@ -4,6 +4,7 @@
 #pragma once
 
 #include <QDialog>
+#include <vector>
 
 #include "Core/NetPlayProto.h"
 
@@ -24,6 +25,11 @@ public:
   explicit PadMappingDialog(QWidget* widget);
 
   int exec() override;
+
+  void SetInitialData(const NetPlay::PadMappingArray& initial_gc_maps,
+                      const NetPlay::GBAConfigArray& initial_gba_config,
+                      const NetPlay::PadMappingArray& initial_wii_maps,
+                      const std::vector<const NetPlay::Player*>& players);
 
   NetPlay::PadMappingArray GetGCPadArray();
   NetPlay::GBAConfigArray GetGBAArray();

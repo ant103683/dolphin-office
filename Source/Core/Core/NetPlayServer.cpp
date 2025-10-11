@@ -29,6 +29,7 @@
 #include "Common/MsgHandler.h"
 #include "Common/SFMLHelper.h"
 #include "Common/StringUtil.h"
+#include "Common/Crypto/SHA1.h"
 #include "Common/UPnP.h"
 #include "Common/Version.h"
 
@@ -817,21 +818,42 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
       PadIndex map;
       packet >> map;
 
-      // If the data is not from the correct player,
-      // then disconnect them.
-      if (m_pad_map.at(map) != player.pid)
-      {
-        return 1;
-      }
+      // 如果发现控制器映射与玩家 PID 不匹配，则进入「宽限 N 帧」容错逻辑。
+      // N = 22 帧（约 0.37 s）以涵盖 PadBuffer 深度与网络 RTT 抖动。
+      const bool mapping_match = (m_pad_map.at(map) == player.pid);
 
+      // 先无条件读取完整 PadData，保证 packet 对齐
       GCPadStatus pad;
       packet >> pad.button;
-      spac << map << pad.button;
       if (!m_gba_config.at(map).enabled)
       {
         packet >> pad.analogA >> pad.analogB >> pad.stickX >> pad.stickY >> pad.substickX >>
             pad.substickY >> pad.triggerLeft >> pad.triggerRight >> pad.isConnected;
+      }
 
+      if (!mapping_match)
+      {
+        if (m_pad_mapping_grace_counter < PAD_MAPPING_GRACE_FRAMES)
+        {
+          ++m_pad_mapping_grace_counter; // 仍在宽限期 —— 继续转发，避免卡顿
+        }
+        else
+        {
+          // 超过宽限期仍不匹配，认为客户端未按要求切换端口；终止处理本条消息
+          WARN_LOG_FMT(NETPLAY, "Pad mapping mismatch beyond grace period (map {} expect {}, got {}).", static_cast<int>(map), m_pad_map.at(map), player.pid);
+          break;
+        }
+      }
+      else
+      {
+        // 匹配正确，重置计数器
+        m_pad_mapping_grace_counter = 0;
+      }
+
+      // 无论是否处于宽限期，只要没有超期，都把 PadData 转发给其他客户端
+      spac << map << pad.button;
+      if (!m_gba_config.at(map).enabled)
+      {
         spac << pad.analogA << pad.analogB << pad.stickX << pad.stickY << pad.substickX
              << pad.substickY << pad.triggerLeft << pad.triggerRight << pad.isConnected;
       }
@@ -1054,6 +1076,20 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
   }
   break;
 
+  case MessageID::RequestStartGameClient:
+  {
+    // if (m_dialog && m_dialog->IsSharingEnabled())
+    if (m_dialog)
+    {
+      OnRequestStartGameClient(player);
+    }
+    else
+    {
+      
+    }
+  }
+  break;
+
   case MessageID::TimeBase:
   {
     u64 timebase = Common::PacketReadU64(packet);
@@ -1124,6 +1160,85 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
     spac << result;
 
     SendToClients(spac);
+  }
+  break;
+
+  case MessageID::REQUEST_PAD_MAPPING_CHANGE_ID: // Ensure this ID matches the one in NetPlayProto.h
+  {
+    INFO_LOG_FMT(NETPLAY, "Received REQUEST_PAD_MAPPING_CHANGE_ID from player {} ({})", player.pid, player.name);
+    PadMappingArray gc_map_from_client;
+    GBAConfigArray gba_cfg_from_client;
+    PadMappingArray wii_map_from_client;
+
+    // Deserialize PadMappingArray (gc_map_from_client)
+    for (PlayerId& mapping : gc_map_from_client)
+    {
+      if (!(packet >> mapping))
+      {
+        WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_PAD_MAPPING_CHANGE_ID too short for GC map (PlayerId) from PID {}.", player.pid);
+        return 1; // Indicate error / disconnect
+      }
+    }
+
+    // Deserialize GBAConfigArray (gba_cfg_from_client)
+    for (GBAConfig& config : gba_cfg_from_client)
+    {
+      if (!(packet >> config.enabled >> config.has_rom >> config.title))
+      {
+        WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_PAD_MAPPING_CHANGE_ID too short for GBA config (metadata) from PID {}.", player.pid);
+        return 1; // Indicate error / disconnect
+      }
+      for (u8& hash_byte : config.hash)
+      {
+        if (!(packet >> hash_byte))
+        {
+          WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_PAD_MAPPING_CHANGE_ID too short for GBA config (hash) from PID {}.", player.pid);
+          return 1; // Indicate error / disconnect
+        }
+      }
+    }
+
+    // Deserialize PadMappingArray (wii_map_from_client)
+    for (PlayerId& mapping : wii_map_from_client)
+    {
+      if (!(packet >> mapping))
+      {
+        WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_PAD_MAPPING_CHANGE_ID too short for Wii map (PlayerId) from PID {}.", player.pid);
+        return 1; // Indicate error / disconnect
+      }
+    }
+
+    // TODO: Validate the data if necessary (e.g., PIDs are valid)
+    SetPadMapping(gc_map_from_client);
+    SetGBAConfig(gba_cfg_from_client, true); // Assuming 'true' triggers broadcast
+    SetWiimoteMapping(wii_map_from_client);
+    // The Set... methods should already handle broadcasting the update to all clients.
+  }
+  break;
+
+  case MessageID::REQUEST_BUFFER_CHANGE_ID:
+  {
+    s32 requested_buffer_value;
+    // Check if there's enough data for s32
+    if (packet.getReadPosition() + sizeof(s32) > packet.getDataSize()) {
+        WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_BUFFER_CHANGE_ID too short to contain buffer value from PID {}.", player.pid);
+        return 1; // Indicate error / disconnect client
+    }
+    if (!(packet >> requested_buffer_value)) {
+        WARN_LOG_FMT(NETPLAY, "Failed to deserialize buffer value from REQUEST_BUFFER_CHANGE_ID (PID: {}).", player.pid);
+        return 1; // Indicate error / disconnect client
+    }
+
+    INFO_LOG_FMT(NETPLAY, "Player PID {} ({}) requested buffer change to: {}", player.pid, player.name, requested_buffer_value);
+    
+    // As per user request, skipping min/max validation if not already part of AdjustPadBufferSize.
+    // AdjustPadBufferSize takes unsigned int.
+    if (requested_buffer_value < 0) {
+        WARN_LOG_FMT(NETPLAY, "Player PID {} ({}) requested negative buffer value {}. Clamping to 0.", player.pid, player.name, requested_buffer_value);
+        requested_buffer_value = 0;
+    }
+    this->AdjustPadBufferSize(static_cast<unsigned int>(requested_buffer_value));
+    // AdjustPadBufferSize will handle broadcasting if not in HIA mode.
   }
   break;
 
@@ -1307,6 +1422,16 @@ bool NetPlayServer::ChangeGame(const SyncIdentifier& sync_identifier,
 
   m_selected_game_identifier = sync_identifier;
   m_selected_game_name = netplay_name;
+
+  // Compute and set SaveHash8 early so that server-only host (not entering game)
+  // can still resolve correct NAND save paths for Wii titles.
+  const std::string hash_str = Common::SHA1::DigestToString(sync_identifier.sync_hash);
+  const std::string hash8 = hash_str.substr(0, 8);
+  SConfig::GetInstance().SetSaveHash8(hash8);
+
+  // Debug logging similar to previous instrumentation
+  const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+  File::WriteStringToFile(log_path, "[NPDEBUG] ChangeGame set SaveHash8=" + hash8 + "\n");
 
   // send changed game to clients
   sf::Packet spac;
@@ -2546,4 +2671,23 @@ void NetPlayServer::ChunkedDataAbort()
   m_chunked_data_event.Set();
   m_chunked_data_complete_event.Set();
 }
+
+// --- 实现新消息的处理函数 ---
+void NetPlayServer::OnRequestStartGameClient(Client& player)
+{
+
+  // if (m_dialog && m_dialog->IsSharingEnabled())
+  if (m_dialog)
+  {
+    // 如果是共享服务器，允许客户端启动游戏
+    RequestStartGame();
+  }
+  else
+  {
+    // 如果不是共享服务器，忽略请求或发送错误消息
+  }
+
+  // RequestStartGame();
+}
+
 }  // namespace NetPlay

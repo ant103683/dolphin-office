@@ -21,6 +21,8 @@
 #include "UICommon/GameFile.h"
 #include "UICommon/UICommon.h"
 
+#include "Common/StringUtil.h"
+
 const QSize GAMECUBE_BANNER_SIZE(96, 32);
 
 GameListModel::GameListModel(QObject* parent) : QAbstractTableModel(parent)
@@ -61,6 +63,21 @@ QVariant GameListModel::data(const QModelIndex& index, int role) const
     return QVariant();
 
   const UICommon::GameFile& game = *m_games[index.row()];
+
+  if (role == Qt::TextAlignmentRole)
+  {
+    const Column col = static_cast<Column>(index.column());
+    switch (col)
+    {
+    // Keep long-text columns left-aligned for readability
+    case Column::Title:
+    case Column::Description:
+    case Column::FilePath:
+      break;
+    default:
+      return Qt::AlignCenter;
+    }
+  }
 
   switch (static_cast<Column>(index.column()))
   {
@@ -137,6 +154,14 @@ QVariant GameListModel::data(const QModelIndex& index, int role) const
       return QString::fromStdString(
                  game.GetDescription(UICommon::GameFile::Variant::LongAndPossiblyCustom))
           .replace(QLatin1Char('\n'), QLatin1Char(' '));
+    }
+    break;
+  case Column::Version:
+    if (role == Qt::DisplayRole || role == SORT_ROLE)
+    {
+      const auto hash = game.GetSyncHash();
+      const std::string hex = Common::BytesToHexString(hash);
+      return QString::fromStdString(hex.substr(0, 8));
     }
     break;
   case Column::Maker:
@@ -241,6 +266,8 @@ QVariant GameListModel::headerData(int section, Qt::Orientation orientation, int
     return tr("Banner");
   case Column::Description:
     return tr("Description");
+  case Column::Version:
+    return tr("Version");
   case Column::Maker:
     return tr("Maker");
   case Column::FileName:

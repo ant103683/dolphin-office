@@ -67,6 +67,8 @@
 #include "VideoCommon/NetPlayGolfUI.h"
 #include "VideoCommon/VideoConfig.h"
 
+#define SERVER_SWITCH 1
+
 namespace
 {
 QString InetAddressToString(const Common::TraversalInetAddress& addr)
@@ -336,11 +338,54 @@ void NetPlayDialog::ConnectWidgets()
     Settings::Instance().GetNetPlayServer()->KickPlayer(id);
   });
   connect(m_assign_ports_button, &QPushButton::clicked, [this] {
-    m_pad_mapping->exec();
+    // SetQWidgetWindowDecorations(m_pad_mapping);
 
-    Settings::Instance().GetNetPlayServer()->SetPadMapping(m_pad_mapping->GetGCPadArray());
-    Settings::Instance().GetNetPlayServer()->SetGBAConfig(m_pad_mapping->GetGBAArray(), true);
-    Settings::Instance().GetNetPlayServer()->SetWiimoteMapping(m_pad_mapping->GetWiimoteArray());
+    // Correctly initialize client and server as per the analyzed code structure
+    auto client = Settings::Instance().GetNetPlayClient();
+    auto server = Settings::Instance().GetNetPlayServer();
+
+    if (!client)
+    {
+      // This case should ideally not happen if the dialog is active
+      DisplayMessage(tr("NetPlay client is not available."), "red");
+      return;
+    }
+
+    // 1. Fetch current mappings and players from the client
+    // Ensure these methods exist and are const-correct in NetPlayClient.h
+    // Assumes NetPlayClient.h and NetPlaySettings.h (or equivalent) are included for these types.
+    const NetPlay::PadMappingArray& current_gc_maps = client->GetPadMapping();
+    const NetPlay::GBAConfigArray& current_gba_config = client->GetGBAConfig();
+    const NetPlay::PadMappingArray& current_wii_maps = client->GetWiimoteMapping();
+    const auto& players = client->GetPlayers(); // Changed to auto& to match typical usage if GetPlayers returns by const ref
+
+    // 2. Pass initial data to PadMappingDialog instance
+    // Ensure m_pad_mapping->SetInitialData can accept const auto& for players or std::vector<const NetPlay::Player*>
+    m_pad_mapping->SetInitialData(current_gc_maps, current_gba_config, current_wii_maps, players);
+
+    // 3. Execute the dialog
+    if (m_pad_mapping->exec() == QDialog::Accepted)
+    {
+      // 4. User clicked "OK", get new mapping settings from the dialog
+      NetPlay::PadMappingArray new_gc_maps = m_pad_mapping->GetGCPadArray();
+      NetPlay::GBAConfigArray new_gba_config = m_pad_mapping->GetGBAArray();
+      NetPlay::PadMappingArray new_wii_maps = m_pad_mapping->GetWiimoteArray();
+
+      // 5. Act based on whether this instance is hosting or is a client
+      if (IsHosting() && server)
+      {
+        // Host: Apply changes directly using NetPlayServer methods
+        server->SetPadMapping(new_gc_maps);
+        server->SetGBAConfig(new_gba_config, true); // Assuming 'true' might imply broadcast or apply
+        server->SetWiimoteMapping(new_wii_maps);
+      }
+      else if (client) // Added explicit check for client before calling its method
+      {
+        // Client: Send a request to the server to change mappings
+        DisplayMessage(tr("发送请求:控制器映射更改..."), "blue");
+        client->RequestPadMappingChange(new_gc_maps, new_gba_config, new_wii_maps);
+      }
+    }
   });
 
   // Chat
@@ -351,15 +396,32 @@ void NetPlayDialog::ConnectWidgets()
 
   // Other
   connect(m_buffer_size_box, &QSpinBox::valueChanged, [this](int value) {
-    if (value == m_buffer_size)
+    if (value == m_buffer_size) // m_buffer_size is updated by OnPadBufferChanged
       return;
 
-    const auto client = Settings::Instance().GetNetPlayClient();
-    const auto server = Settings::Instance().GetNetPlayServer();
-    if (server && !m_host_input_authority)
-      server->AdjustPadBufferSize(value);
-    else
-      client->AdjustPadBufferSize(value);
+    auto client = Settings::Instance().GetNetPlayClient();
+    auto server = Settings::Instance().GetNetPlayServer();
+
+    if (!client) // Should not happen if UI is active
+      return;
+
+    if (server && IsHosting()) // Current user is the HOST
+    {
+      if (!m_host_input_authority) // Host, and NOT HostInputAuthority mode
+      {
+        server->AdjustPadBufferSize(value);
+      }
+      else // Host, AND HostInputAuthority mode (Host adjusts its own client-side buffer)
+      {
+        client->AdjustPadBufferSize(value);
+      }
+    }
+    else // Current user is a CLIENT (not hosting)
+    {
+      // Client requests buffer change from server (regardless of HIA mode from client's perspective for request)
+      // The server will decide how to handle it based on its HIA state.
+      client->RequestBufferChange(value);
+    }
   });
 
   const auto hia_function = [this](bool enable) {
@@ -463,32 +525,72 @@ void NetPlayDialog::OnIndexRefreshFailed(const std::string error)
 
 void NetPlayDialog::OnStart()
 {
-  if (!Settings::Instance().GetNetPlayClient()->DoAllPlayersHaveGame())
+  // 检查当前是主机还是客户端
+  auto server = Settings::Instance().GetNetPlayServer();
+  auto client = Settings::Instance().GetNetPlayClient();
+  bool is_host = false;
+  bool is_client = true;
+  if (server)
   {
-    if (ModalMessageBox::question(
-            this, tr("Warning"),
-            tr("Not all players have the game. Do you really want to start?")) == QMessageBox::No)
+    is_host = true;
+    is_client = false;
+  }
+  if (!client)
+  {
+    is_client = false;
+  }
+
+  if (is_host)
+  {
+    // --- 主机逻辑 (保持大部分不变) ---
+    // 检查是否有玩家没有游戏
+    if (!client->DoAllPlayersHaveGame())
+    {
+      if (ModalMessageBox::question(
+              this, tr("Warning"),
+              tr("Not all players have the game. Do you really want to start?")) == QMessageBox::No)
+        return;
+    }
+
+    // 检查严格同步模式下的自动分辨率
+    if (m_strict_settings_sync_action->isChecked() && Config::Get(Config::GFX_EFB_SCALE) == 0)
+    {
+      ModalMessageBox::critical(
+          this, tr("Error"),
+          tr("Auto internal resolution is not allowed in strict sync mode, as it depends on window "
+             "size.\n\nPlease select a specific internal resolution."));
       return;
-  }
+    }
 
-  if (m_strict_settings_sync_action->isChecked() && Config::Get(Config::GFX_EFB_SCALE) == 0)
+    // 检查游戏文件是否存在 (这个检查可能重复，因为 UpdateGUI 已经检查了)
+    const auto game = FindGameFile(m_current_game_identifier);
+    if (!game)
+    {
+      PanicAlertFmtT("Selected game doesn't exist in game list!");
+      return;
+    }
+
+    // 主机直接请求服务器开始游戏检查流程
+    if (server->RequestStartGame())
+      SetOptionsEnabled(false);  // 启动请求成功后禁用选项
+  }
+  else if (is_client)
   {
-    ModalMessageBox::critical(
-        this, tr("Error"),
-        tr("Auto internal resolution is not allowed in strict sync mode, as it depends on window "
-           "size.\n\nPlease select a specific internal resolution."));
-    return;
-  }
 
-  const auto game = FindGameFile(m_current_game_identifier);
-  if (!game)
-  {
-    PanicAlertFmtT("Selected game doesn't exist in game list!");
-    return;
-  }
+    // --- 客户端逻辑 (新) ---
+    // 客户端向服务器发送启动请求消息
+    sf::Packet request_packet;
+    request_packet << static_cast<u8>(NetPlay::MessageID::RequestStartGameClient);
 
-  if (Settings::Instance().GetNetPlayServer()->RequestStartGame())
-    SetOptionsEnabled(false);
+    // 通过 NetPlayClient 发送给服务器
+    client->SendAsync(std::move(request_packet));
+
+    // 给用户一些反馈
+    DisplayMessage(tr("发送请求:开始游戏..."), "blue");
+    // DisplayMessage(tr("如果游戏没有开始，证明该服务器未勾选[客户端开始]，无需继续尝试."), "red");
+    // 暂时禁用开始按钮防止重复点击 (UpdateGUI 会处理)
+    m_start_button->setEnabled(false);
+  }
 }
 
 void NetPlayDialog::reject()
@@ -534,9 +636,9 @@ void NetPlayDialog::show(std::string nickname, bool use_traversal)
 #else
   m_hide_remote_gbas_action->setVisible(false);
 #endif
-  m_start_button->setHidden(!is_hosting);
+  m_start_button->setHidden(false);
   m_kick_button->setHidden(!is_hosting);
-  m_assign_ports_button->setHidden(!is_hosting);
+  m_assign_ports_button->setVisible(true);
   m_room_box->setHidden(!is_hosting);
   m_hostcode_label->setHidden(!is_hosting);
   m_hostcode_action_button->setHidden(!is_hosting);
@@ -615,6 +717,17 @@ void NetPlayDialog::UpdateGUI()
   const auto server = Settings::Instance().GetNetPlayServer();
   if (!client)
     return;
+
+  bool game_selected = !m_current_game_name.empty();  // 假设 GetGameID() 返回 std::string
+  bool game_running = Core::GetState(Core::System::GetInstance()) != Core::State::Uninitialized;
+
+  if (server) {
+    game_running = server->IsRunning() || server->IsStartPending();
+  }
+  
+  // Allow start if game selected and not running, for both host and client
+  bool game_can_start = game_selected && !game_running;
+  m_start_button->setEnabled(game_can_start);
 
   // Update Player List
   const auto players = client->GetPlayers();
@@ -850,28 +963,75 @@ void NetPlayDialog::GameStatusChanged(bool running)
 
 void NetPlayDialog::SetOptionsEnabled(bool enabled)
 {
-  if (Settings::Instance().GetNetPlayServer())
+  // Get current state
+  auto server = Settings::Instance().GetNetPlayServer();
+  auto client = Settings::Instance().GetNetPlayClient();
+  bool is_host = server != nullptr;
+   bool is_client = !is_host && client != nullptr; // Client check might be useful elsewhere
+
+  // Start button logic is handled in UpdateGUI
+
+  // Enable/disable options only for the host for most settings
+  m_game_button->setEnabled(enabled && is_host);
+  m_savedata_none_action->setEnabled(enabled && is_host);
+  m_savedata_load_only_action->setEnabled(enabled && is_host);
+  m_savedata_load_and_write_action->setEnabled(enabled && is_host);
+  m_savedata_all_wii_saves_action->setEnabled(enabled && is_host);
+  m_sync_codes_action->setEnabled(enabled && is_host);
+  // m_assign_ports_button->setEnabled(enabled && is_host); // Old logic
+  // Allow Assign Ports button if client exists (either host or client connected) and options are enabled
+  // m_assign_ports_button->setEnabled(enabled && client != nullptr);
+  m_strict_settings_sync_action->setEnabled(enabled && is_host);
+  m_host_input_authority_action->setEnabled(enabled && is_host);
+  m_golf_mode_action->setEnabled(enabled && is_host);
+  m_fixed_delay_action->setEnabled(enabled && is_host);
+
+  // Buffer size box logic modification
+  if (is_host)
   {
-    m_start_button->setEnabled(enabled);
-    m_game_button->setEnabled(enabled);
-    m_savedata_none_action->setEnabled(enabled);
-    m_savedata_load_only_action->setEnabled(enabled);
-    m_savedata_load_and_write_action->setEnabled(enabled);
-    m_savedata_all_wii_saves_action->setEnabled(enabled);
-    m_sync_codes_action->setEnabled(enabled);
-    m_assign_ports_button->setEnabled(enabled);
-    m_strict_settings_sync_action->setEnabled(enabled);
-    m_host_input_authority_action->setEnabled(enabled);
-    m_golf_mode_action->setEnabled(enabled);
-    m_fixed_delay_action->setEnabled(enabled);
+    // Host can always see the buffer box.
+    // It's enabled if HIA is OFF (adjusts global buffer) OR if HIA is ON (adjusts host's client-side buffer).
+    m_buffer_size_box->setVisible(true);
+    m_buffer_label->setVisible(true);
+    m_buffer_size_box->setEnabled(true);
+    m_buffer_label->setEnabled(true);
+    m_buffer_label->setText(m_host_input_authority ? tr("Max Buffer:") : tr("Buffer:"));
+  }
+  else if (is_client)
+  {
+    // Client can always see the buffer box to request changes (unless HIA forces a specific client view later).
+    // The actual effect of client's buffer value might be nuanced by HIA, but they can always request.
+    m_buffer_size_box->setVisible(true);
+    m_buffer_label->setVisible(true);
+    m_buffer_size_box->setEnabled(true);
+    m_buffer_label->setEnabled(true);
+    // Label for client should reflect what they are trying to set, server decides actual effect.
+    // OnHostInputAuthorityChanged might update this label further if client's view needs to change under HIA.
+    m_buffer_label->setText(tr("Buffer:")); 
   }
 
+  // Record input is available for everyone (when enabled)
   m_record_input_action->setEnabled(enabled);
 }
 
 void NetPlayDialog::OnMsgStartGame()
 {
-  DisplayMessage(tr("Started game"), "green");
+  auto server = Settings::Instance().GetNetPlayServer();
+  // if (server && dbzUserManager::GetInstance().dbzConfig.is_server) {
+
+#ifdef SERVER_SWITCH
+  if (server) 
+    DisplayMessage(tr("Started game,Please ignore the server game stop!!!"), "blue");
+#else
+  if (!server) 
+    DisplayMessage(tr("Started game"), "green");
+#endif
+
+  // if (SERVER_SWITCH && server) {
+  //   DisplayMessage(tr("Started game,Please ignore the server game stop!!!"), "blue");
+  // } else {
+  //   DisplayMessage(tr("Started game"), "green");
+  // }
 
   g_netplay_chat_ui =
       std::make_unique<NetPlayChatUI>([this](const std::string& message) { SendMessage(message); });
@@ -882,14 +1042,24 @@ void NetPlayDialog::OnMsgStartGame()
   }
 
   QueueOnObject(this, [this] {
-    const auto client = Settings::Instance().GetNetPlayClient();
+    auto client = Settings::Instance().GetNetPlayClient();
+    auto server = Settings::Instance().GetNetPlayServer();
 
     if (client)
     {
-      if (const auto game = FindGameFile(m_current_game_identifier))
+#if SERVER_SWITCH
+      if (server)
+        return;
+#endif
+
+      if (auto game = FindGameFile(m_current_game_identifier))
+      {
         client->StartGame(game->GetFilePath());
+      }
       else
+      {
         PanicAlertFmtT("Selected game doesn't exist in game list!");
+      }
     }
     UpdateDiscordPresence();
   });
@@ -940,12 +1110,11 @@ void NetPlayDialog::OnHostInputAuthorityChanged(bool enabled)
 
   QueueOnObject(this, [this, enabled] {
     const bool is_hosting = IsHosting();
-    const bool enable_buffer = is_hosting != enabled;
 
     if (is_hosting)
     {
-      m_buffer_size_box->setEnabled(enable_buffer);
-      m_buffer_label->setEnabled(enable_buffer);
+      m_buffer_size_box->setEnabled(true);
+      m_buffer_label->setEnabled(true);
       m_buffer_size_box->setHidden(false);
       m_buffer_label->setHidden(false);
     }
@@ -953,8 +1122,8 @@ void NetPlayDialog::OnHostInputAuthorityChanged(bool enabled)
     {
       m_buffer_size_box->setEnabled(true);
       m_buffer_label->setEnabled(true);
-      m_buffer_size_box->setHidden(!enable_buffer);
-      m_buffer_label->setHidden(!enable_buffer);
+      m_buffer_size_box->setHidden(false);
+      m_buffer_label->setHidden(false);
     }
 
     m_buffer_label->setText(enabled ? tr("Max Buffer:") : tr("Buffer:"));
@@ -1032,8 +1201,8 @@ void NetPlayDialog::OnGolferChanged(const bool is_golfer, const std::string& gol
   if (m_host_input_authority)
   {
     QueueOnObject(this, [this, is_golfer] {
-      m_buffer_size_box->setEnabled(!is_golfer);
-      m_buffer_label->setEnabled(!is_golfer);
+      m_buffer_size_box->setEnabled(true);
+      m_buffer_label->setEnabled(true);
     });
   }
 

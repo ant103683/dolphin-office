@@ -15,7 +15,8 @@
 #include <tuple>
 #include <utility>
 #include <vector>
-
+#include <filesystem>  // Added for directory iteration
+#include <cctype>      // For std::isxdigit
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <pugixml.hpp>
@@ -643,9 +644,21 @@ std::string GameFile::GetNetPlayName(const Core::TitleDatabase& title_database) 
     std::string disc_text = "Disc ";
     info.push_back(disc_text + std::to_string(disc_number));
   }
+
+  // Build the base NetPlay name using the original logic first.
+  std::string base_name;
   if (info.empty())
-    return name;
-  return fmt::format("{} ({})", name, fmt::join(info, ", "));
+    base_name = name;
+  else
+    base_name = fmt::format("{}({})", name, fmt::join(info, ", "));
+
+  // Append short sync-hash (first 8 hex characters) so hosts/clients can distinguish
+  // between different revisions/modifications of the same title.
+  const auto sync_hash = GetSyncHash();
+  const std::string hash_hex = Common::BytesToHexString(sync_hash);
+  const std::string hash8 = hash_hex.substr(0, 8);
+
+  return fmt::format("{}({})", base_name, hash8);
 }
 
 static Common::SHA1::Digest GetHash(u32 value)
@@ -793,7 +806,42 @@ GameFile::CompareSyncIdentifier(const NetPlay::SyncIdentifier& sync_identifier) 
 std::string GameFile::GetWiiFSPath() const
 {
   ASSERT(DiscIO::IsWii(m_platform));
-  return Common::GetTitleDataPath(m_title_id, Common::FromWhichRoot::Configured);
+
+  // First, construct the default path (may include hash8 if SConfig has been set)
+  const std::string default_path =
+      Common::GetTitleDataPathForGame(m_title_id, Common::FromWhichRoot::Configured);
+
+  // If it exists, just return it.
+  if (File::IsDirectory(default_path))
+    return default_path;
+
+  // Fallback: Some titles may be stored under an 8-character hash sub-directory when hash8 is not
+  // yet known in the current session. Look for such a directory under the base title path.
+  const std::string base_title_path =
+      Common::GetTitlePath(m_title_id, Common::FromWhichRoot::Configured);
+
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  for (const auto& dir_entry : fs::directory_iterator(base_title_path, ec))
+  {
+    if (ec)
+      break;  // stop on error but still keep safety, will fallback later
+    if (!dir_entry.is_directory())
+      continue;
+
+    const std::string name = dir_entry.path().filename().string();
+    if (name.size() == 8 && std::all_of(name.begin(), name.end(), [](unsigned char c) {
+                      return std::isxdigit(c);
+                    }))
+    {
+      const fs::path candidate = dir_entry.path() / "data";
+      if (fs::is_directory(candidate))
+        return candidate.string();
+    }
+  }
+
+  // Last resort: return the default path even if it doesn't exist.
+  return default_path;
 }
 
 bool GameFile::ShouldShowFileFormatDetails() const

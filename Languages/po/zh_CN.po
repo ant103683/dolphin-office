@@ -1569,6 +1569,10 @@ msgstr "MemoryCard: ClearBlock 在无效地址 ({0:#x}) 中调用"
 msgid "Control Stick"
 msgstr "控制摇杆"
 
+#: ???/SelectHashDialog.cpp
+msgid "This save file corresponds to multiple versions of the game. Please select the version you want to use with this save file. Each game version number can be viewed on the emulator's main interface."
+msgstr "该存档对应的游戏存在多个版本,请选择想要使用该存档的版本,每个游戏版本号在模拟器主界面可以看到."
+
 #: Source/Core/Core/HW/GCPadEmu.cpp:55
 #: Source/Core/DolphinQt/Config/Mapping/GCPadEmu.cpp:31
 #: Source/Core/DolphinQt/TAS/GCTASInputWindow.cpp:31
@@ -12432,7 +12436,7 @@ msgstr "踢除玩家"
 
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:295
 msgid "Assign Controller Ports"
-msgstr "指定控制器端口"
+msgstr "分配玩家端口"
 
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:407
 msgid "Stopped game"
@@ -12784,7 +12788,7 @@ msgstr "GBA 端口 %1"
 
 #: Source/Core/DolphinQt/NetPlay/PadMappingDialog.cpp:37
 msgid "GC Port %1"
-msgstr "GC 端口 %1"
+msgstr "玩家 %1"
 
 #: Source/Core/DolphinQt/NKitWarningDialog.cpp:30
 msgid "NKit Warning"

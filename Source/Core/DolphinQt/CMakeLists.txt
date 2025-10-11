@@ -352,6 +352,8 @@ add_executable(dolphin-emu
   RiivolutionBootWidget.h
   SearchBar.cpp
   SearchBar.h
+  SelectHashDialog.cpp
+  SelectHashDialog.h
   Settings.cpp
   Settings.h
   Settings/AdvancedPane.cpp
@@ -404,7 +406,7 @@ add_executable(dolphin-emu
   Updater.h
   WiiUpdate.cpp
   WiiUpdate.h
-)
+ "SelectHashDialog.cpp" "SelectHashDialog.h")
 
 if (WIN32)
   target_sources(dolphin-emu PRIVATE

@@ -64,48 +64,63 @@ void PadMappingDialog::ConnectWidgets()
   }
 }
 
+void PadMappingDialog::SetInitialData(const NetPlay::PadMappingArray& initial_gc_maps,
+                                      const NetPlay::GBAConfigArray& initial_gba_config,
+                                      const NetPlay::PadMappingArray& initial_wii_maps,
+                                      const std::vector<const NetPlay::Player*>& players)
+{
+  m_pad_mapping = initial_gc_maps;
+  m_gba_config = initial_gba_config;
+  m_wii_mapping = initial_wii_maps;
+  m_players = players;
+}
+
 int PadMappingDialog::exec()
 {
-  const auto client = Settings::Instance().GetNetPlayClient();
-  const auto server = Settings::Instance().GetNetPlayServer();
-  // Load Settings
-  m_players = client->GetPlayers();
-  m_pad_mapping = server->GetPadMapping();
-  m_gba_config = server->GetGBAConfig();
-  m_wii_mapping = server->GetWiimoteMapping();
-
-  QStringList players;
-
-  players.append(tr("None"));
+  QStringList players_for_combo_box;
+  players_for_combo_box.append(tr("None"));
 
   for (const auto& player : m_players)
   {
-    players.append(
+    players_for_combo_box.append(
         QStringLiteral("%1 (%2)").arg(QString::fromStdString(player->name)).arg(player->pid));
   }
 
   for (auto& combo_group : {m_gc_boxes, m_wii_boxes})
   {
-    const bool gc = combo_group == m_gc_boxes;
+    bool gc = combo_group == m_gc_boxes;
     for (size_t i = 0; i < combo_group.size(); i++)
     {
       auto& combo = combo_group[i];
       const QSignalBlocker blocker(combo);
 
       combo->clear();
-      combo->addItems(players);
+      combo->addItems(players_for_combo_box);
 
-      const auto index = gc ? m_pad_mapping[i] : m_wii_mapping[i];
-
-      combo->setCurrentIndex(index);
+      const u16 target_pid = gc ? m_pad_mapping[i] : m_wii_mapping[i];
+      int selection_index = 0;  // Default to "None"
+      if (target_pid != 0)
+      {
+        for (size_t player_idx = 0; player_idx < m_players.size(); ++player_idx)
+        {
+          if (m_players[player_idx]->pid == target_pid)
+          {
+            selection_index = static_cast<int>(player_idx) + 1;  // +1 because "None" is at index 0
+            break;
+          }
+        }
+      }
+      combo->setCurrentIndex(selection_index);
     }
   }
 
   for (size_t i = 0; i < m_gba_boxes.size(); i++)
   {
     const QSignalBlocker blocker(m_gba_boxes[i]);
-
-    m_gba_boxes[i]->setChecked(m_gba_config[i].enabled);
+    if (i < m_gba_config.size())
+        m_gba_boxes[i]->setChecked(m_gba_config[i].enabled);
+    else
+        m_gba_boxes[i]->setChecked(false);
   }
 
   return QDialog::exec();
