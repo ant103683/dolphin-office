@@ -203,11 +203,11 @@ static void DoState(Core::System& system, PointerWrap& p)
 
 void LoadFromBuffer(Core::System& system, Common::UniqueBuffer<u8>& buffer)
 {
-  if (NetPlay::IsNetPlayRunning())
-  {
-    OSD::AddMessage("Loading savestates is disabled in Netplay to prevent desyncs");
-    return;
-  }
+  // if (NetPlay::IsNetPlayRunning())
+  // {
+  //   OSD::AddMessage("Loading savestates is disabled in Netplay to prevent desyncs");
+  //   return;
+  // }
 
   if (AchievementManager::GetInstance().IsHardcoreModeActive())
   {
@@ -840,11 +840,11 @@ void LoadAs(Core::System& system, const std::string& filename)
   if (!Core::IsRunningOrStarting(system))
     return;
 
-  if (NetPlay::IsNetPlayRunning())
-  {
-    OSD::AddMessage("Loading savestates is disabled in Netplay to prevent desyncs");
-    return;
-  }
+  // if (NetPlay::IsNetPlayRunning())
+  // // {
+  // //   OSD::AddMessage("Loading savestates is disabled in Netplay to prevent desyncs");
+  // //   return;
+  // // }
 
   if (AchievementManager::GetInstance().IsHardcoreModeActive())
   {
