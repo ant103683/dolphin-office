@@ -65,6 +65,7 @@
 #include "Core/IOS/Uids.h"
 #include "Core/NetPlayClient.h"  //for NetPlayUI
 #include "Core/NetPlayCommon.h"
+#include "Core/NetplayManager.h"
 #include "Core/SyncIdentifier.h"
 
 #include "DiscIO/Enums.h"
@@ -128,6 +129,7 @@ NetPlayServer::NetPlayServer(const u16 port, const bool forward_port, NetPlayUI*
                              const NetTraversalConfig& traversal_config)
     : m_dialog(dialog)
 {
+  NetPlay::NetplayManager::GetInstance();
   //--use server time
   if (enet_initialize() != 0)
   {
@@ -508,8 +510,9 @@ ConnectionError NetPlayServer::OnConnect(ENetPeer* incoming_connection, sf::Pack
   {
     std::lock_guard lkp(m_crit.players);
     // add new player to list of players
-    m_players.emplace(*PeerPlayerId(new_player.socket), std::move(new_player));
-    // sync pad mappings with everyone
+  m_players.emplace(*PeerPlayerId(new_player.socket), std::move(new_player));
+  NetPlay::NetplayManager::GetInstance().activeClientWithPid(new_player.pid);
+  // sync pad mappings with everyone
     UpdatePadMapping();
     UpdateGBAConfig();
     UpdateWiimoteMapping();
@@ -558,6 +561,12 @@ unsigned int NetPlayServer::OnDisconnect(const Client& player)
   auto it = m_players.find(player.pid);
   if (it != m_players.end())
     m_players.erase(it);
+
+  NetPlay::NetplayManager::GetInstance().deactiveClientWithPid(pid);
+  if (m_players.size() <= 1)
+  {
+    NetPlay::NetplayManager::GetInstance().resetAllClient();
+  }
 
   // alert other players of disconnect
   SendToClients(spac);
@@ -1422,6 +1431,9 @@ bool NetPlayServer::ChangeGame(const SyncIdentifier& sync_identifier,
 
   m_selected_game_identifier = sync_identifier;
   m_selected_game_name = netplay_name;
+
+  // Reset client states except host when game changes
+  NetPlay::NetplayManager::GetInstance().resetClientsExceptHost();
 
   // Compute and set SaveHash8 early so that server-only host (not entering game)
   // can still resolve correct NAND save paths for Wii titles.
