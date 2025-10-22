@@ -134,6 +134,7 @@ public:
   void RequestGolfControl(PlayerId pid);
   void RequestGolfControl();
   std::string GetCurrentGolfer();
+  void TrySendInitialStateAck();
 
   // Send and receive pads values
   struct WiimoteDataBatchEntry
@@ -325,6 +326,7 @@ private:
   bool m_is_connected = false;
   ConnectionState m_connection_state = ConnectionState::Failure;
 
+  bool m_has_pending_initial_state_ack = false;
   PlayerId m_pid = 0;
   NetSettings m_net_settings{};
   std::map<PlayerId, Player> m_players;

@@ -24,6 +24,7 @@
 #include "Common/CommonPaths.h"
 #include "Common/ENet.h"
 #include "Common/FileUtil.h"
+#include "Common/IOFile.h"
 #include "Common/HttpRequest.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
@@ -47,6 +48,7 @@
 #include "Core/GeckoCodeConfig.h"
 #include "Core/HW/EXI/EXI.h"
 #include "Core/HW/EXI/EXI_Device.h"
+#include "NetplayManager.h"
 #ifdef HAS_LIBMGBA
 #include "Core/HW/GBACore.h"
 #endif
@@ -565,7 +567,7 @@ unsigned int NetPlayServer::OnDisconnect(const Client& player)
   NetPlay::NetplayManager::GetInstance().deactiveClientWithPid(pid);
   if (m_players.size() <= 1)
   {
-    NetPlay::NetplayManager::GetInstance().resetAllClient();
+    NetPlay::NetplayManager::GetInstance().resetClientsExceptHost();
   }
 
   // alert other players of disconnect
@@ -1074,6 +1076,77 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
   {
     packet >> m_players[player.pid].has_ipl_dump;
     packet >> m_players[player.pid].has_hardware_fma;
+  }
+  break;
+
+  case MessageID::ClientInitialStateAck:
+  {
+    auto& netPlayManager = NetplayManager::GetInstance();
+    if (!netPlayManager.ShouldLoadStatus()) {
+      return 0;
+    }
+    bool has_initial_state = false;
+    packet >> has_initial_state;
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    File::IOFile log_file(log_path, "ab");
+    if (log_file)
+    {
+      const std::string& r = fmt::format("server has_initial_state:{}, player:{}\n",
+                                           has_initial_state, player.pid);
+      log_file.WriteBytes(r.c_str(), r.size());
+    }
+    if (log_file)
+    {
+      const std::string& r = fmt::format("Player {} reported HasInitialStateSave = {}\n",
+                                           player.pid, has_initial_state);
+      log_file.WriteBytes(r.c_str(), r.size());
+    }
+    if (has_initial_state) {
+      if (log_file)
+      {
+        const std::string& r = fmt::format("Player {} has initial state save.\n", player.pid);
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+      if (netPlayManager.setClientLoadStatusSuccess(player.pid)) {
+        if (log_file)
+        {
+          const std::string& r = fmt::format("Player {} set load status success.\n", player.pid);
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+        if (netPlayManager.canLoadStatus()) {
+          if (log_file)
+          {
+            const std::string& r = fmt::format("All clients ready, now can send pause order.\n");
+            log_file.WriteBytes(r.c_str(), r.size());
+          }
+            if (log_file)
+            {
+                const std::string& r = "All clients ready, starting to load state.\n";
+                log_file.WriteBytes(r.c_str(), r.size());
+            }
+            SendPauseCommand();
+            if (log_file)
+            {
+                const std::string& r = "Pause command sent.\n";
+                log_file.WriteBytes(r.c_str(), r.size());
+            }
+        }
+      } else {
+        netPlayManager.SetShouldLoadStatus(false);
+        if (log_file)
+        {
+          const std::string& r = fmt::format("Player {} set load status failed.\n", player.pid);
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+      }
+    } else {
+        netPlayManager.SetShouldLoadStatus(false);
+        if (log_file)
+        {
+          const std::string& r = fmt::format("Player {} has no initial state save.\n", player.pid);
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+    }
   }
   break;
 
@@ -2703,3 +2776,18 @@ void NetPlayServer::OnRequestStartGameClient(Client& player)
 }
 
 }  // namespace NetPlay
+
+void NetPlay::NetPlayServer::SendPauseCommand()
+{
+  sf::Packet packet;
+  packet << MessageID::PauseSimulation;
+  SendToClients(packet);
+
+  const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+  File::IOFile log_file(log_path, "ab");
+  if (log_file)
+  {
+    const std::string& r = fmt::format("server sent pause command\n");
+    log_file.WriteBytes(r.c_str(), r.size());
+  }
+}

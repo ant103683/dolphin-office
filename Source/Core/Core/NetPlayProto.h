@@ -173,6 +173,10 @@ enum class MessageID : u8
   PowerButton = 0xA7,
   RequestStartGameClient = 0xA8,
 
+  // 客户端在处理完 OnChangeGame 并检查 initial state save 后的回报
+  ClientInitialStateAck = 0xA9,  // 客户端 -> 服务器
+  PauseSimulation = 0xAA,
+
 
   TimeBase = 0xB0,
   DesyncDetected = 0xB1,
