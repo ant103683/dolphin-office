@@ -108,7 +108,7 @@ bool NetplayManager::canLoadStatus()
   std::lock_guard<std::mutex> lock(m_mutex);
   for (const auto& state : m_client_states)
   {
-    if (state.pid != 0 && state.is_active && state.state != LoadStatus::SUCCESS)
+    if (state.pid != 1 && state.is_active && state.state != LoadStatus::SUCCESS)
     {
       return false;
     }

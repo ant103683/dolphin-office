@@ -2950,7 +2950,7 @@ void NetPlayClient::TrySendInitialStateAck()
     return;
 
   const bool initial_state_available = m_has_pending_initial_state_ack;
-  m_has_pending_initial_state_ack = false;
+  // m_has_pending_initial_state_ack = false;
 
   // 向服务器发送客户端是否存在 initial state save 的确认消息
   sf::Packet ack_packet;
