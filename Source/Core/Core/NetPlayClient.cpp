@@ -2949,14 +2949,15 @@ void NetPlayClient::TrySendInitialStateAck()
   if (!m_has_pending_initial_state_ack)
     return;
 
+  const bool initial_state_available = m_has_pending_initial_state_ack;
   m_has_pending_initial_state_ack = false;
 
   // 向服务器发送客户端是否存在 initial state save 的确认消息
   sf::Packet ack_packet;
   ack_packet << MessageID::ClientInitialStateAck;
-  ack_packet << true;
+  ack_packet << initial_state_available;
   Send(ack_packet);
 
-  INFO_LOG_FMT(NETPLAY, "Sent initial state acknowledgement.");
+  INFO_LOG_FMT(NETPLAY, "Sent initial state acknowledgement: {}.", initial_state_available);
 }
 }

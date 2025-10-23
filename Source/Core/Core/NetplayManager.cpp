@@ -105,18 +105,14 @@ void NetplayManager::resetClientsExceptHost()
 
 bool NetplayManager::canLoadStatus()
 {
-  if (!ShouldLoadStatus())
-    return false;
   std::lock_guard<std::mutex> lock(m_mutex);
   for (const auto& state : m_client_states)
   {
     if (state.pid != 0 && state.is_active && state.state != LoadStatus::SUCCESS)
     {
-      m_should_load_status = false;
       return false;
     }
   }
-  m_load_status = true;
   return true;
 }
 

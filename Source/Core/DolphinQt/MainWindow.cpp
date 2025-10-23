@@ -141,6 +141,7 @@
 
 #include "VideoCommon/NetPlayChatUI.h"
 #include "VideoCommon/VideoConfig.h"
+#include "VideoCommon/VideoEvents.h"
 
 #ifdef HAVE_XRANDR
 #include "UICommon/X11Utils.h"
@@ -429,7 +430,18 @@ void MainWindow::InitCoreCallbacks()
     if (state == Core::State::Running)
     {
       if (auto client = Settings::Instance().GetNetPlayClient())
-        client->TrySendInitialStateAck();
+      {
+        if (!m_netplay_initial_ack_after_present_hook)
+        {
+          m_netplay_initial_ack_after_present_hook =
+              AfterPresentEvent::Register(
+                  [this, client](PresentInfo& info) {
+                    QueueOnObject(this, [client] { client->TrySendInitialStateAck(); });
+                    m_netplay_initial_ack_after_present_hook.reset();
+                  },
+                  "NetPlayInitialStateAckAfterFirstPresent");
+        }
+      }
 
       if (m_fullscreen_requested)
       {
