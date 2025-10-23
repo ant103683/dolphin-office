@@ -1,7 +1,10 @@
 // Copyright 2024 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "NetplayManager.h"
-#include "Core/NetPlayServer.h"
+#include "NetPlayServer.h"
+
+#include "Common/CommonPaths.h"
+#include "Common/FileUtil.h"
 
 #include <mutex>
 #include <vector>
@@ -11,27 +14,14 @@
 namespace NetPlay
 {
 
-// Static member definitions
-std::unique_ptr<NetplayManager> NetplayManager::s_instance = nullptr;
-std::mutex NetplayManager::s_instance_mutex;
-
 NetplayManager& NetplayManager::GetInstance()
 {
-  // Double-checked locking pattern for thread-safe singleton
-  if (s_instance == nullptr)
-  {
-    std::lock_guard<std::mutex> lock(s_instance_mutex);
-    if (s_instance == nullptr)
-    {
-      s_instance = std::unique_ptr<NetplayManager>(new NetplayManager());
-    }
-  }
-  return *s_instance;
+  static NetplayManager s_instance;
+  return s_instance;
 }
 
 NetplayManager::NetplayManager()
 {
-  // TODO: Initialize your member variables here
   m_client_states.resize(MAX_PLAYERS);
   for (int i = 0; i < MAX_PLAYERS; ++i)
   {
@@ -43,23 +33,16 @@ NetplayManager::NetplayManager()
 
 NetplayManager::~NetplayManager()
 {
-  // TODO: Cleanup code here if needed
+  // Cleanup code here if needed
 }
 
-// Load status management implementation
-LoadStatus NetplayManager::GetLoadStatus() const
-{
-  std::lock_guard<std::mutex> lock(m_mutex);
-  return m_load_status;
-}
-
-void NetplayManager::SetLoadStatus(LoadStatus status)
+void NetplayManager::SetLoadStatus(bool status)
 {
   std::lock_guard<std::mutex> lock(m_mutex);
   m_load_status = status;
 }
 
-bool NetplayManager::ShouldLoadStatus() const
+bool NetplayManager::ShouldLoadStatus()
 {
   std::lock_guard<std::mutex> lock(m_mutex);
   return m_should_load_status;
@@ -69,6 +52,10 @@ void NetplayManager::SetShouldLoadStatus(bool should_load)
 {
   std::lock_guard<std::mutex> lock(m_mutex);
   m_should_load_status = should_load;
+  if (!m_should_load_status) {
+    m_load_status = false;
+    resetClientsExceptHost();
+  }
 }
 
 void NetplayManager::activeClientWithPid(int pid)
@@ -78,21 +65,31 @@ void NetplayManager::activeClientWithPid(int pid)
   m_client_states[pid].state = LoadStatus::INIT;
 }
 
+bool NetplayManager::getClientLoadStatus() {
+  return m_load_status;
+}
+
+void NetplayManager::setClientLoadStatus(LoadStatus status,int pid) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_client_states[pid].state = status;
+}
+
+bool NetplayManager::setClientLoadStatusSuccess(int pid)
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  if (m_client_states[pid].is_active && m_client_states[pid].state == LoadStatus::INIT)
+  {
+    m_client_states[pid].state = LoadStatus::SUCCESS;
+    return true;
+  }
+  return false;
+}
+
 void NetplayManager::deactiveClientWithPid(int pid)
 {
   std::lock_guard<std::mutex> lock(m_mutex);
   m_client_states[pid].is_active = false;
   m_client_states[pid].state = LoadStatus::INIT;
-}
-
-void NetplayManager::resetAllClient()
-{
-  std::lock_guard<std::mutex> lock(m_mutex);
-  for (auto& client : m_client_states)
-  {
-    client.is_active = false;
-    client.state = LoadStatus::INIT;
-  }
 }
 
 void NetplayManager::resetClientsExceptHost()
@@ -101,13 +98,15 @@ void NetplayManager::resetClientsExceptHost()
   for (auto& client : m_client_states)
   {
     if (client.pid == 0)
-      continue; // host 保持原状态
+      continue;
     client.state = LoadStatus::INIT;
   }
 }
 
 bool NetplayManager::canLoadStatus()
 {
+  if (!ShouldLoadStatus())
+    return false;
   std::lock_guard<std::mutex> lock(m_mutex);
   for (const auto& state : m_client_states)
   {
@@ -117,23 +116,18 @@ bool NetplayManager::canLoadStatus()
       return false;
     }
   }
-  // 若全部满足条件则保持现有 should_load_status 不变，返回 true
+  m_load_status = true;
   return true;
 }
 
-// TODO: Implement your additional methods here
-// Example implementations:
-//
-// void NetplayManager::SetGameActuallyStarted(bool started)
-// {
-//   std::lock_guard<std::mutex> lock(m_mutex);
-//   m_game_actually_started = started;
-// }
-//
-// bool NetplayManager::IsGameActuallyStarted() const
-// {
-//   std::lock_guard<std::mutex> lock(m_mutex);
-//   return m_game_actually_started;
-// }
+bool NetplayManager::HasInitialStateSave(const std::string& game_id,
+                                         const std::string& hash8) const
+{
+  // 生成完整路径: <UserPath>/StateSaves/initial/<game_id>_<hash8>.sav
+  using namespace Common;
+  std::string base_path = File::GetUserPath(D_STATESAVES_IDX);
+  std::string full_path = base_path + "initial" + DIR_SEP + game_id + "_" + hash8 + ".sav";
+  return File::Exists(full_path);
+}
 
 }  // namespace NetPlay

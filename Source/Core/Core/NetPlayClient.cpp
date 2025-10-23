@@ -45,6 +45,7 @@
 #include "Core/Config/SessionSettings.h"
 #include "Core/Config/WiimoteSettings.h"
 #include "Core/ConfigManager.h"
+#include "Core/Core.h"
 #include "Core/GeckoCode.h"
 #include "Core/HW/EXI/EXI.h"
 #include "Core/HW/EXI/EXI_DeviceIPL.h"
@@ -69,6 +70,7 @@
 #include "Core/IOS/Uids.h"
 #include "Core/Movie.h"
 #include "Core/NetPlayCommon.h"
+#include "Core/NetplayManager.h"
 #include "Core/PowerPC/PowerPC.h"
 #include "Core/SyncIdentifier.h"
 #include "Core/System.h"
@@ -390,6 +392,19 @@ void NetPlayClient::OnData(sf::Packet& packet)
 
   case MessageID::WiimoteMapping:
     OnWiimoteMapping(packet);
+    break;
+
+  case MessageID::PauseSimulation:
+    Core::QueueHostJob([](Core::System& system) { Core::SetState(system, Core::State::Paused); });
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+      File::IOFile log_file(log_path, "ab");
+      if (log_file)
+      {
+        const std::string& r = fmt::format("client received pause command\n");
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+    }
     break;
 
   case MessageID::PadData:
@@ -812,6 +827,18 @@ void NetPlayClient::OnChangeGame(sf::Packet& packet)
     std::lock_guard lkg(m_crit.game);
     ReceiveSyncIdentifier(packet, m_selected_game);
     packet >> netplay_name;
+  }
+
+  // 如果当前实例不是主机，检查是否存在对应游戏的 initial 存档文件
+  if (m_local_player && !m_local_player->IsHost())
+  {
+    const std::string game_id = m_selected_game.game_id;
+    const std::string full_hash = Common::SHA1::DigestToString(m_selected_game.sync_hash);
+    const std::string hash8 = full_hash.substr(0, 8);
+    const bool has_initial_state =
+        NetPlay::NetplayManager::GetInstance().HasInitialStateSave(game_id, hash8);
+
+    m_has_pending_initial_state_ack = has_initial_state;
   }
 
   INFO_LOG_FMT(NETPLAY, "Game changed to {}", netplay_name);
@@ -2912,4 +2939,24 @@ int SerialInterface::CSIDevice_GCController::NetPlay_InGamePadToLocalPad(int num
     return NetPlay::netplay_client->InGamePadToLocalPad(numPAD);
 
   return numPAD;
+}
+
+namespace NetPlay
+{
+// called from ---GUI--- thread
+void NetPlayClient::TrySendInitialStateAck()
+{
+  if (!m_has_pending_initial_state_ack)
+    return;
+
+  m_has_pending_initial_state_ack = false;
+
+  // 向服务器发送客户端是否存在 initial state save 的确认消息
+  sf::Packet ack_packet;
+  ack_packet << MessageID::ClientInitialStateAck;
+  ack_packet << true;
+  Send(ack_packet);
+
+  INFO_LOG_FMT(NETPLAY, "Sent initial state acknowledgement.");
+}
 }

@@ -426,10 +426,16 @@ void MainWindow::InitCoreCallbacks()
     if (state == Core::State::Uninitialized)
       OnStopComplete();
 
-    if (state == Core::State::Running && m_fullscreen_requested)
+    if (state == Core::State::Running)
     {
-      FullScreen();
-      m_fullscreen_requested = false;
+      if (auto client = Settings::Instance().GetNetPlayClient())
+        client->TrySendInitialStateAck();
+
+      if (m_fullscreen_requested)
+      {
+        FullScreen();
+        m_fullscreen_requested = false;
+      }
     }
   });
   installEventFilter(this);
