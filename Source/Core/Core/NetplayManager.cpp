@@ -97,7 +97,7 @@ void NetplayManager::resetClientsExceptHost()
   std::lock_guard<std::mutex> lock(m_mutex);
   for (auto& client : m_client_states)
   {
-    if (client.pid == 0)
+    if (client.pid == 1)
       continue;
     client.state = LoadStatus::INIT;
   }
