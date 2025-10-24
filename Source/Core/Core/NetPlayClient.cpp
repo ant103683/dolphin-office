@@ -407,6 +407,10 @@ void NetPlayClient::OnData(sf::Packet& packet)
     }
     break;
 
+  case MessageID::ResumeSimulation:
+    Core::QueueHostJob([](Core::System& system) { Core::SetState(system, Core::State::Running); });
+    break;
+
   case MessageID::PadData:
     OnPadData(packet);
     break;

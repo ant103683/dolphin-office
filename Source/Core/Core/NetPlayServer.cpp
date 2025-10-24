@@ -2791,3 +2791,18 @@ void NetPlay::NetPlayServer::SendPauseCommand()
     log_file.WriteBytes(r.c_str(), r.size());
   }
 }
+
+void NetPlay::NetPlayServer::SendResumeCommand()
+{
+  sf::Packet packet;
+  packet << MessageID::ResumeSimulation;
+  SendToClients(packet);
+
+  const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+  File::IOFile log_file(log_path, "ab");
+  if (log_file)
+  {
+    const std::string& r = fmt::format("server sent resume command\n");
+    log_file.WriteBytes(r.c_str(), r.size());
+  }
+}
