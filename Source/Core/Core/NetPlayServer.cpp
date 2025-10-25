@@ -567,7 +567,7 @@ unsigned int NetPlayServer::OnDisconnect(const Client& player)
   NetPlay::NetplayManager::GetInstance().deactiveClientWithPid(pid);
   if (m_players.size() <= 1)
   {
-    NetPlay::NetplayManager::GetInstance().resetClientsExceptHost();
+    NetPlay::NetplayManager::GetInstance().resetClientsExceptHost_NoLock();
   }
 
   // alert other players of disconnect
@@ -1082,9 +1082,6 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
   case MessageID::ClientInitialStateAck:
   {
     auto& netPlayManager = NetplayManager::GetInstance();
-    if (!netPlayManager.ShouldLoadStatus()) {
-      return 0;
-    }
     bool has_initial_state = false;
     packet >> has_initial_state;
     const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
@@ -1125,6 +1122,15 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
                 log_file.WriteBytes(r.c_str(), r.size());
             }
             SendPauseCommand();
+
+            // Launch a detached thread that will resume the simulation after a 1-second delay.
+            std::thread([this]() {
+              // Sleep for 1 second to give clients time to process the pause and load state.
+              std::this_thread::sleep_for(std::chrono::seconds(1));
+              // After the delay, send the resume command.
+              SendResumeCommand();
+            }).detach();
+
             if (log_file)
             {
                 const std::string& r = "Pause command sent.\n";
@@ -1132,7 +1138,6 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
             }
         }
       } else {
-        netPlayManager.SetShouldLoadStatus(false);
         if (log_file)
         {
           const std::string& r = fmt::format("Player {} set load status failed.\n", player.pid);
@@ -1140,7 +1145,6 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
         }
       }
     } else {
-        netPlayManager.SetShouldLoadStatus(false);
         if (log_file)
         {
           const std::string& r = fmt::format("Player {} has no initial state save.\n", player.pid);
@@ -1506,7 +1510,7 @@ bool NetPlayServer::ChangeGame(const SyncIdentifier& sync_identifier,
   m_selected_game_name = netplay_name;
 
   // Reset client states except host when game changes
-  NetPlay::NetplayManager::GetInstance().resetClientsExceptHost();
+  NetPlay::NetplayManager::GetInstance().resetClientsExceptHost_NoLock();
 
   // Compute and set SaveHash8 early so that server-only host (not entering game)
   // can still resolve correct NAND save paths for Wii titles.
