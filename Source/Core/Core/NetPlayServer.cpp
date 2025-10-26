@@ -1050,6 +1050,8 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
     sf::Packet spac;
     spac << MessageID::StopGame;
 
+    NetPlay::NetplayManager::GetInstance().resetClientsExceptHost_NoLock();
+
     std::lock_guard lkp(m_crit.players);
     SendToClients(spac);
   }

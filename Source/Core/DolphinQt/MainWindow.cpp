@@ -68,6 +68,7 @@
 #include "Core/NetPlayClient.h"
 #include "Core/NetPlayProto.h"
 #include "Core/NetPlayServer.h"
+#include "Core/NetplayManager.h"
 #include "Core/State.h"
 #include "Core/System.h"
 #include "Core/WiiUtils.h"
@@ -431,6 +432,7 @@ void MainWindow::InitCoreCallbacks()
     {
       if (auto client = Settings::Instance().GetNetPlayClient())
       {
+#if IS_CLIENT
         if (!m_netplay_initial_ack_after_present_hook)
         {
           m_netplay_initial_ack_after_present_hook =
@@ -441,6 +443,7 @@ void MainWindow::InitCoreCallbacks()
                   },
                   "NetPlayInitialStateAckAfterFirstPresent");
         }
+#endif
       }
 
       if (m_fullscreen_requested)

@@ -8,6 +8,9 @@
 #include <string>
 #include <vector>
 
+#define IS_SERVER 0
+#define IS_CLIENT 1
+
 namespace Core {
 class System;
 }

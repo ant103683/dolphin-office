@@ -135,6 +135,7 @@ public:
   void RequestGolfControl();
   std::string GetCurrentGolfer();
   void TrySendInitialStateAck();
+  bool checkHasInitialStateSave();
 
   // Send and receive pads values
   struct WiimoteDataBatchEntry
