@@ -15,6 +15,11 @@ namespace Core {
 class System;
 }
 
+namespace UICommon
+{
+class GameFile;
+}
+
 namespace NetPlay
 {
 
@@ -59,6 +64,7 @@ public:
 
   void activeClientWithPid(int pid);
   void deactiveClientWithPid(int pid);
+  void UpdateGameInfo(const UICommon::GameFile& game);
     // 恢复所有客户端状态,游戏改变的时候调用
   void resetClientsExceptHost_NoLock();
   // 检查是否所有活跃客户端都满足读档

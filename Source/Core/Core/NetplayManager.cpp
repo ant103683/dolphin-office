@@ -1,13 +1,20 @@
 // Copyright 2024 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "NetplayManager.h"
+#include "Core/NetplayManager.h"
 #include "NetPlayServer.h"
 
 #include "Common/CommonPaths.h"
 #include "Common/FileUtil.h"
 #include "Common/IOFile.h"
 #include "Core/State.h"
+#include "Core/TitleDatabase.h"
 
+#include "DiscIO/Volume.h"
+#include "UICommon/GameFile.h"
+
+#include "picojson.h"
+
+#include <fstream>
 #include <mutex>
 #include <vector>
 #include <fmt/format.h>
@@ -16,6 +23,50 @@
 
 namespace NetPlay
 {
+void NetplayManager::UpdateGameInfo(const UICommon::GameFile& game)
+{
+  const std::string json_path = File::GetUserPath(D_CONFIG_IDX) + "games.json";
+  picojson::value games_json;
+  std::ifstream file(json_path);
+  if (file)
+  {
+    file >> games_json;
+  }
+
+  picojson::array games;
+  if (!games_json.is<picojson::null>())
+  {
+    games = games_json.get<picojson::array>();
+  }
+
+  const std::string game_id = game.GetGameID();
+  const std::string hash = Common::SHA1::DigestToString(game.GetSyncHash());
+
+  bool found = false;
+  for (const auto& entry : games)
+  {
+    const auto& obj = entry.get<picojson::object>();
+    if (obj.at("game_id").get<std::string>() == game_id && obj.at("hash").get<std::string>() == hash)
+    {
+      found = true;
+      break;
+    }
+  }
+
+  if (!found)
+  {
+    picojson::object new_game;
+    new_game["game_id"] = picojson::value(game_id);
+    new_game["hash"] = picojson::value(hash);
+    new_game["name"] = picojson::value(game.GetName(UICommon::GameFile::Variant::LongAndPossiblyCustom));
+    new_game["revision"] = picojson::value(static_cast<double>(game.GetRevision()));
+    new_game["disc_number"] = picojson::value(static_cast<double>(game.GetDiscNumber()));
+    games.push_back(picojson::value(new_game));
+
+    std::ofstream outfile(json_path);
+    outfile << picojson::value(games).serialize(true);
+  }
+}
 
 NetplayManager& NetplayManager::GetInstance()
 {
