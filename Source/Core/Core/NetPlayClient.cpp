@@ -395,7 +395,25 @@ void NetPlayClient::OnData(sf::Packet& packet)
     break;
 
   case MessageID::PauseSimulation:
-    Core::QueueHostJob([](Core::System& system) { Core::SetState(system, Core::State::Paused); });
+    Core::QueueHostJob([this](Core::System& system) { 
+      Core::SetState(system, Core::State::Paused); 
+      
+      // 尝试加载初始状态存档
+#if IS_CLIENT
+      const std::string game_id = m_selected_game.game_id;
+      const std::string full_hash = Common::SHA1::DigestToString(m_selected_game.sync_hash);
+      const std::string hash8 = full_hash.substr(0, 8);
+      
+      if (NetPlay::NetplayManager::GetInstance().LoadInitialState(system, game_id, hash8))
+      {
+        INFO_LOG_FMT(NETPLAY, "Successfully loaded initial state for game {} ({})", game_id, hash8);
+      }
+      else
+      {
+        INFO_LOG_FMT(NETPLAY, "No initial state found for game {} ({})", game_id, hash8);
+      }
+#endif
+    });
     {
       const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
       File::IOFile log_file(log_path, "ab");
@@ -405,6 +423,10 @@ void NetPlayClient::OnData(sf::Packet& packet)
         log_file.WriteBytes(r.c_str(), r.size());
       }
     }
+    break;
+
+  case MessageID::ResumeSimulation:
+    Core::QueueHostJob([](Core::System& system) { Core::SetState(system, Core::State::Running); });
     break;
 
   case MessageID::PadData:
@@ -828,18 +850,9 @@ void NetPlayClient::OnChangeGame(sf::Packet& packet)
     ReceiveSyncIdentifier(packet, m_selected_game);
     packet >> netplay_name;
   }
-
-  // 如果当前实例不是主机，检查是否存在对应游戏的 initial 存档文件
-  if (m_local_player && !m_local_player->IsHost())
-  {
-    const std::string game_id = m_selected_game.game_id;
-    const std::string full_hash = Common::SHA1::DigestToString(m_selected_game.sync_hash);
-    const std::string hash8 = full_hash.substr(0, 8);
-    const bool has_initial_state =
-        NetPlay::NetplayManager::GetInstance().HasInitialStateSave(game_id, hash8);
-
-    m_has_pending_initial_state_ack = has_initial_state;
-  }
+#if IS_CLIENT
+  m_has_pending_initial_state_ack = checkHasInitialStateSave();
+#endif
 
   INFO_LOG_FMT(NETPLAY, "Game changed to {}", netplay_name);
 
@@ -870,6 +883,11 @@ void NetPlayClient::OnGameStatus(sf::Packet& packet)
 
 void NetPlayClient::OnStartGame(sf::Packet& packet)
 {
+#if IS_CLIENT
+  if (!m_has_pending_initial_state_ack)
+     m_has_pending_initial_state_ack = checkHasInitialStateSave();
+#endif
+
   {
     std::lock_guard lkg(m_crit.game);
 
@@ -2949,14 +2967,27 @@ void NetPlayClient::TrySendInitialStateAck()
   if (!m_has_pending_initial_state_ack)
     return;
 
+  const bool initial_state_available = m_has_pending_initial_state_ack;
   m_has_pending_initial_state_ack = false;
 
   // 向服务器发送客户端是否存在 initial state save 的确认消息
   sf::Packet ack_packet;
   ack_packet << MessageID::ClientInitialStateAck;
-  ack_packet << true;
+  ack_packet << initial_state_available;
   Send(ack_packet);
 
-  INFO_LOG_FMT(NETPLAY, "Sent initial state acknowledgement.");
+  INFO_LOG_FMT(NETPLAY, "Sent initial state acknowledgement: {}.", initial_state_available);
+}
+
+bool NetPlayClient::checkHasInitialStateSave()
+{
+  bool has_initial_state = false;
+#if IS_CLIENT
+  const std::string game_id = m_selected_game.game_id;
+  const std::string full_hash = Common::SHA1::DigestToString(m_selected_game.sync_hash);
+  const std::string hash8 = full_hash.substr(0, 8);
+  has_initial_state = NetPlay::NetplayManager::GetInstance().HasInitialStateSave(game_id, hash8);
+#endif
+  return has_initial_state;
 }
 }

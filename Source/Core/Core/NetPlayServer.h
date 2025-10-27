@@ -222,6 +222,7 @@ private:
   void OnComputeGameDigest(sf::Packet& packet, Client& player);
 
   void SendPauseCommand();
+  void SendResumeCommand();
 
 public:
   bool IsRunning() const { return m_is_running; }

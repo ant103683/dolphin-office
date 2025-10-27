@@ -19,6 +19,7 @@
 
 #include "Core/Boot/Boot.h"
 #include "DolphinQt/FIFO/FIFOPlayerWindow.h"
+#include "Common/HookableEvent.h"
 
 class QMenu;
 class QStackedWidget;
@@ -292,4 +293,5 @@ private:
   WatchWidget* m_watch_widget;
   CheatsManager* m_cheats_manager;
   QByteArray m_render_widget_geometry;
+  Common::EventHook m_netplay_initial_ack_after_present_hook;
 };

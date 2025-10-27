@@ -176,6 +176,7 @@ enum class MessageID : u8
   // 客户端在处理完 OnChangeGame 并检查 initial state save 后的回报
   ClientInitialStateAck = 0xA9,  // 客户端 -> 服务器
   PauseSimulation = 0xAA,
+  ResumeSimulation = 0xAB,
 
 
   TimeBase = 0xB0,

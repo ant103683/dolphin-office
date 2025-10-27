@@ -10,6 +10,7 @@
 
 #include "Core/Config/MainSettings.h"
 #include "Core/Core.h"
+#include "Core/NetplayManager.h"
 #include "Core/TimePlayed.h"
 
 #include "DiscIO/Enums.h"
@@ -392,6 +393,7 @@ std::string GameListModel::GetNetPlayName(const UICommon::GameFile& game) const
 
 void GameListModel::AddGame(const std::shared_ptr<const UICommon::GameFile>& game)
 {
+  NetPlay::NetplayManager::GetInstance().UpdateGameInfo(*game);
   beginInsertRows(QModelIndex(), m_games.size(), m_games.size());
   m_games.push_back(game);
   endInsertRows();

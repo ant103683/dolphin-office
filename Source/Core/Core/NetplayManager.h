@@ -8,6 +8,18 @@
 #include <string>
 #include <vector>
 
+#define IS_SERVER 0
+#define IS_CLIENT 1
+
+namespace Core {
+class System;
+}
+
+namespace UICommon
+{
+class GameFile;
+}
+
 namespace NetPlay
 {
 
@@ -21,7 +33,7 @@ enum class LoadStatus
 
 struct ClientState
 {
-  int pid = 0;
+  int pid;
   bool is_active = false;
   LoadStatus state = LoadStatus::INIT;
 };
@@ -50,21 +62,20 @@ public:
   // void SetClientState(ClientState state);
   // ClientState GetClientState() const;
 
-  // 设置加是否读档
-  void SetLoadStatus(bool status);
-  // 是否读档,用于防止出错时第二次还进入读档
-  bool ShouldLoadStatus();
-  // 设置是否应该加载状态,游戏改变或者有客户端报告不满足读档调用
-  void SetShouldLoadStatus(bool should_load);
-  // 收到客户端加入的通知,将其状态设为活跃/不活跃
   void activeClientWithPid(int pid);
   void deactiveClientWithPid(int pid);
-  // 恢复所有客户端状态,游戏改变的时候调用
-  void resetClientsExceptHost();
+  void UpdateGameInfo(const UICommon::GameFile& game);
+    // 恢复所有客户端状态,游戏改变的时候调用
+  void resetClientsExceptHost_NoLock();
   // 检查是否所有活跃客户端都满足读档
   bool canLoadStatus();
   // 检查 StateSaves/initial 目录下是否存在指定游戏的初始存档文件
   bool HasInitialStateSave(const std::string& game_id, const std::string& hash8) const;
+
+  // 触发加载 initial 目录下的即时存档 (game_id_hash8.sav)。
+  // 返回值表示是否成功开始加载（文件存在且允许加载）。
+  bool LoadInitialState(Core::System& system, const std::string& game_id,
+                        const std::string& hash8);
 
   bool getClientLoadStatus();
   void setClientLoadStatus(LoadStatus status,int pid);
@@ -75,21 +86,12 @@ public:
   mutable std::vector<ClientState> m_client_states;
 
 private:
+
   // Private constructor for singleton
   NetplayManager();
 
   // Member variables for thread safety
   mutable std::mutex m_mutex;
-
-  // 客户端状态管理
-  bool m_load_status = false;
-  // 如果有任何玩家出错,马上调为false,后续同个游戏不加载存档;如果改变为不同游戏,则改为true
-  bool m_should_load_status = true;
-
-  // TODO: Add your private member variables here
-  // Example:
-  // bool m_game_actually_started = false;
-  // ClientState m_client_state = ClientState::Disconnected;
 };
 
 }  // namespace NetPlay

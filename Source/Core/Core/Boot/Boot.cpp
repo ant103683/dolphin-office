@@ -53,6 +53,9 @@
 #include "Core/PowerPC/PPCSymbolDB.h"
 #include "Core/PowerPC/PowerPC.h"
 #include "Core/System.h"
+#include "Core/NetplayManager.h"
+
+
 
 #include "DiscIO/Enums.h"
 #include "DiscIO/GameModDescriptor.h"
@@ -184,6 +187,7 @@ BootParameters::BootParameters(Parameters&& parameters_, BootSessionData boot_se
 std::unique_ptr<BootParameters> BootParameters::GenerateFromFile(std::string boot_path,
                                                                  BootSessionData boot_session_data_)
 {
+
   return GenerateFromFile(std::vector<std::string>{std::move(boot_path)},
                           std::move(boot_session_data_));
 }
@@ -223,6 +227,7 @@ std::unique_ptr<BootParameters> BootParameters::GenerateFromFile(std::vector<std
   }
 
   std::string path = paths.front();
+
   if (paths.size() == 1)
     paths.clear();
 
