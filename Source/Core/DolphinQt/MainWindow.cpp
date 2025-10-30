@@ -20,6 +20,7 @@
 #include <QPushButton>
 
 #include <fmt/format.h>
+#include <vector>
 
 #include <future>
 #include <optional>
@@ -134,6 +135,7 @@
 
 #include "UICommon/DiscordPresence.h"
 #include "UICommon/GameFile.h"
+#include "UICommon/GameListExporter.h"
 #include "UICommon/ResourcePack/Manager.h"
 #include "UICommon/ResourcePack/Manifest.h"
 #include "UICommon/ResourcePack/ResourcePack.h"
@@ -720,6 +722,7 @@ void MainWindow::ConnectToolBar()
   connect(m_tool_bar, &ToolBar::ControllersPressed, this, &MainWindow::ShowPlayerSelectionDialog);
   connect(m_tool_bar, &ToolBar::GraphicsPressed, this, &MainWindow::ShowGraphicsWindow);
   connect(m_tool_bar, &ToolBar::NetplayList, this, &MainWindow::ShowNetPlayBrowser);
+  connect(m_tool_bar, &ToolBar::GamesInfo, this, &MainWindow::ExportGameListToJSON);
 
   connect(m_tool_bar, &ToolBar::StepPressed, m_code_widget, &CodeWidget::Step);
   connect(m_tool_bar, &ToolBar::StepOverPressed, m_code_widget, &CodeWidget::StepOver);
@@ -1584,6 +1587,31 @@ void MainWindow::IncrementSelectedStateSlot()
   if (state_slot > State::NUM_STATES)
     state_slot = 1;
   m_menu_bar->SetStateSlot(state_slot);
+}
+
+void MainWindow::ExportGameListToJSON()
+{
+  std::vector<std::shared_ptr<const UICommon::GameFile>> games;
+
+  const auto& model = m_game_list->GetGameListModel();
+  const int rows = model.rowCount({});
+  games.reserve(rows);
+
+  for (int i = 0; i < rows; ++i)
+  {
+    auto game = model.GetGameFile(i);
+    if (game && game->IsValid())
+      games.emplace_back(std::move(game));
+  }
+
+  if (!UICommon::ExportGamesListJson(games))
+  {
+    ModalMessageBox::critical(this, tr("Error"), tr("Failed to export games list to JSON."));
+  }
+  else
+  {
+    ModalMessageBox::information(this, tr("Success"), tr("Games list exported to Config/games_list.json."));
+  }
 }
 
 void MainWindow::DecrementSelectedStateSlot()

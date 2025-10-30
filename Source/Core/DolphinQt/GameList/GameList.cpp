@@ -624,6 +624,7 @@ void GameList::ExportWiiSave()
     // Attempt to extract an 8-character hexadecimal hash folder from the WiiFS path
     std::string extracted_hash8;
     const std::string wii_fs_path = game->GetWiiFSPath();
+#if defined(__cpp_exceptions)
     try
     {
       std::filesystem::path p(wii_fs_path);
@@ -640,6 +641,20 @@ void GameList::ExportWiiSave()
     catch (...) {
       // In case std::filesystem throws (e.g. malformed path), just ignore and fall back
     }
+#else
+    {
+      std::filesystem::path p(wii_fs_path);
+      if (p.has_parent_path())
+      {
+        const std::string parent = p.parent_path().filename().string();
+        if (parent.size() == 8 && std::all_of(parent.begin(), parent.end(),
+                                              [](unsigned char c) { return std::isxdigit(c); }))
+        {
+          extracted_hash8 = parent;
+        }
+      }
+    }
+#endif
 
     // Temporarily set the hash so that WiiSave::Export() looks in the correct directory
     SConfig::GetInstance().SetSaveHash8(extracted_hash8);

@@ -9,6 +9,8 @@ add_library(uicommon
   GameFile.h
   GameFileCache.cpp
   GameFileCache.h
+  GameListExporter.cpp
+  GameListExporter.h
   NetPlayIndex.cpp
   NetPlayIndex.h
   ResourcePack/Manager.cpp

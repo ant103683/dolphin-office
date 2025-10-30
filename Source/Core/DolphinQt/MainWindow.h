@@ -136,6 +136,9 @@ private:
   void CreateComponents();
 
   void ConnectGameList();
+
+  // Export current game list metadata to Config/games_list.json
+  void ExportGameListToJSON();
   void ConnectHost();
   void ConnectHotkeys();
   void ConnectMenuBar();
