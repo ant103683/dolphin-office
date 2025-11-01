@@ -11,6 +11,7 @@
 #include "Common/FileUtil.h"
 #include "Common/JsonUtil.h"
 #include "Common/Crypto/SHA1.h"
+#include "Core/TitleDatabase.h"
 #include "DiscIO/Enums.h"
 #include "UICommon/GameFile.h"
 
@@ -53,10 +54,22 @@ bool ExportGamesListJson(const std::vector<std::shared_ptr<const GameFile>>& gam
       continue;
 
     picojson::object g;
-    g["title"] = picojson::value{game->GetLongName()};
-    g["id"] = picojson::value{game->GetGameID()};
-    // SHA1 hash of the game file for integrity identification
-    g["hash"] = picojson::value{Common::SHA1::DigestToString(game->GetSyncHash())};
+    // Use NetPlay name (same as used in host creation)
+    g["netplay_name"] = picojson::value{game->GetNetPlayName(Core::TitleDatabase{})};
+    g["game_id"] = picojson::value{game->GetGameID()};
+    g["revision"] = picojson::value{static_cast<double>(game->GetRevision())};
+    g["disc_number"] = picojson::value{static_cast<double>(game->GetDiscNumber())};
+    // Sync hash for netplay compatibility verification
+    g["sync_hash"] = picojson::value{Common::SHA1::DigestToString(game->GetSyncHash())};
+    // Sync identifier components (same as used in netplay)
+    auto sync_id = game->GetSyncIdentifier();
+    picojson::object sync_obj;
+    sync_obj["dol_elf_size"] = picojson::value{static_cast<double>(sync_id.dol_elf_size)};
+    sync_obj["game_id"] = picojson::value{sync_id.game_id};
+    sync_obj["revision"] = picojson::value{static_cast<double>(sync_id.revision)};
+    sync_obj["disc_number"] = picojson::value{static_cast<double>(sync_id.disc_number)};
+    sync_obj["is_datel"] = picojson::value{sync_id.is_datel};
+    g["sync_identifier"] = picojson::value{sync_obj};
     g["region"] = picojson::value{RegionToString(game->GetRegion())};
 
     arr.emplace_back(g);
