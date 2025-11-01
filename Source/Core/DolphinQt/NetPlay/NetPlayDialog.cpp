@@ -220,7 +220,7 @@ void NetPlayDialog::CreateMainLayout()
     if (gld.exec() != QDialog::Accepted)
       return;
     Settings::Instance().GetNetPlayServer()->ComputeGameDigest(
-        gld.GetSelectedGame().GetSyncIdentifier());
+        gld.GetSelectedGameSyncIdentifier());
   });
   m_game_digest_menu->addAction(tr("SD Card"), this, [] {
     Settings::Instance().GetNetPlayServer()->ComputeGameDigest(
@@ -447,10 +447,10 @@ void NetPlayDialog::ConnectWidgets()
     {
       Settings& settings = Settings::Instance();
 
-      const UICommon::GameFile& game = gld.GetSelectedGame();
-      const std::string netplay_name = m_game_list_model.GetNetPlayName(game);
+      const std::string netplay_name = gld.GetSelectedGameNetPlayName();
+      const NetPlay::SyncIdentifier sync_identifier = gld.GetSelectedGameSyncIdentifier();
 
-      settings.GetNetPlayServer()->ChangeGame(game.GetSyncIdentifier(), netplay_name);
+      settings.GetNetPlayServer()->ChangeGame(sync_identifier, netplay_name);
       Settings::GetQSettings().setValue(QStringLiteral("netplay/hostgame"),
                                         QString::fromStdString(netplay_name));
     }

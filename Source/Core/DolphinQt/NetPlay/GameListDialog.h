@@ -5,6 +5,7 @@
 
 #include <QDialog>
 
+#include "Core/SyncIdentifier.h"
 #include "DolphinQt/GameList/GameListModel.h"
 
 class QVBoxLayout;
@@ -23,7 +24,10 @@ public:
   explicit GameListDialog(const GameListModel& game_list_model, QWidget* parent);
 
   int exec() override;
-  const UICommon::GameFile& GetSelectedGame() const;
+  
+  // 新增方法用于获取选中游戏的同步标识符和网络游戏名称
+  NetPlay::SyncIdentifier GetSelectedGameSyncIdentifier() const;
+  std::string GetSelectedGameNetPlayName() const;
 
 private:
   void CreateWidgets();

@@ -27,6 +27,10 @@
 
 #include "UICommon/GameFile.h"
 #include "UICommon/NetPlayIndex.h"
+#include "Common/FileUtil.h"
+#include "Core/NetplayManager.h"
+#include "UICommon/GameListExporter.h"
+#include <picojson.h>
 
 NetPlaySetupDialog::NetPlaySetupDialog(const GameListModel& game_list_model, QWidget* parent)
     : QDialog(parent), m_game_list_model(game_list_model)
@@ -350,18 +354,99 @@ void NetPlaySetupDialog::accept()
       return;
     }
 
+#if IS_SERVER
+    // 在服务器模式下，列表项并不包含 GameFile 指针。我们构造一个空的 GameFile 对象，
+    // 以避免下游逻辑访问空指针导致崩溃。
+    const auto dummy_game = std::make_shared<UICommon::GameFile>();
+    emit Host(*dummy_game);
+#else
     emit Host(*items[0]->data(Qt::UserRole).value<std::shared_ptr<const UICommon::GameFile>>());
+#endif
   }
 }
 
 void NetPlaySetupDialog::PopulateGameList()
 {
+#if IS_SERVER
+  // SERVER 模式：从 games_list.json 填充
+  {
+    std::string log_path = File::GetUserPath(D_LOGS_IDX);
+    log_path = "savehash8.txt";
+    File::CreateFullPath(log_path);
+    std::ofstream fp;
+    File::OpenFStream(fp, log_path, std::ios_base::app);
+    if (fp)
+      fp << "PopulateGameList (SERVER mode): loading from games_list.json\n";
+  }
+
+  QSignalBlocker blocker(m_host_games);
+  m_host_games->clear();
+
+  picojson::value json_data = UICommon::ImportGamesListJson();
+  if (json_data.is<picojson::object>())
+  {
+    const auto& root_obj = json_data.get<picojson::object>();
+    auto games_it = root_obj.find("games");
+    if (games_it != root_obj.end() && games_it->second.is<picojson::array>())
+    {
+      const auto& games_array = games_it->second.get<picojson::array>();
+      for (const auto& game_value : games_array)
+      {
+        if (!game_value.is<picojson::object>())
+          continue;
+
+        const auto& game_obj = game_value.get<picojson::object>();
+        auto name_it = game_obj.find("netplay_name");
+        if (name_it == game_obj.end() || !name_it->second.is<std::string>())
+          continue;
+
+        QString game_name = QString::fromStdString(name_it->second.get<std::string>());
+        auto* item = new QListWidgetItem(game_name);
+
+        QVariant json_variant;
+        json_variant.setValue(game_value);
+        item->setData(Qt::UserRole, json_variant);
+
+        m_host_games->addItem(item);
+      }
+    }
+  }
+
+  m_host_games->sortItems();
+#else
+  // 原有实现（客户端模式）
+  {
+    std::string log_path = File::GetUserPath(D_LOGS_IDX);
+    log_path = "savehash8.txt";
+    File::CreateFullPath(log_path);
+    std::ofstream fp;
+    File::OpenFStream(fp, log_path, std::ios_base::app);
+    if (fp)
+    {
+        fp << "PopulateGameList called\n";
+        fp << "Game count: " << m_game_list_model.rowCount(QModelIndex()) << "\n";
+    }
+  }
+
   QSignalBlocker blocker(m_host_games);
 
   m_host_games->clear();
-  for (int i = 0; i < m_game_list_model.rowCount(QModelIndex()); i++)
+  for (int i = 0; i < m_game_list_model.rowCount(QModelIndex()); i)
   {
     std::shared_ptr<const UICommon::GameFile> game = m_game_list_model.GetGameFile(i);
+
+    {
+        std::string log_path = File::GetUserPath(D_LOGS_IDX);
+        log_path = "savehash8.txt";
+        File::CreateFullPath(log_path);
+        std::ofstream fp;
+        File::OpenFStream(fp, log_path, std::ios_base::app);
+        if (fp)
+        {
+            const std::string name = m_game_list_model.GetNetPlayName(*game);
+            fp << name << "\n";
+        }
+    }
 
     auto* item =
         new QListWidgetItem(QString::fromStdString(m_game_list_model.GetNetPlayName(*game)));
@@ -370,6 +455,7 @@ void NetPlaySetupDialog::PopulateGameList()
   }
 
   m_host_games->sortItems();
+#endif
 
   const QString selected_game =
       Settings::GetQSettings().value(QStringLiteral("netplay/hostgame"), QString{}).toString();

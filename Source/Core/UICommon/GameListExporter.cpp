@@ -8,12 +8,57 @@
 #include <iomanip>
 #include <sstream>
 
+#include <fmt/format.h>
 #include "Common/FileUtil.h"
+#include "Common/IOFile.h"
 #include "Common/JsonUtil.h"
 #include "Common/Crypto/SHA1.h"
 #include "Core/TitleDatabase.h"
 #include "DiscIO/Enums.h"
 #include "UICommon/GameFile.h"
+
+#if 1
+void WriteDebugLog(const char* fmt, ...)
+{
+    // Based on the working example from NetPlayServer.cpp
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    File::CreateFullPath(log_path);
+    File::IOFile log_file(log_path, "ab");
+
+    if (log_file)
+    {
+        static bool s_first = true;
+        if (s_first)
+        {
+            s_first = false;
+            const char* session_start = "--- NEW SESSION ---\n";
+            log_file.WriteBytes(session_start, strlen(session_start));
+        }
+
+        char buffer[2048];
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(buffer, sizeof(buffer), fmt, args);
+        va_end(args);
+
+        time_t now = time(0);
+        char dt[32];
+        ctime_s(dt, sizeof(dt), &now);
+        std::string prefix = std::string(dt);
+        if (!prefix.empty() && prefix.back() == '\n')
+        {
+            prefix.pop_back(); // remove trailing newline
+        }
+
+        std::string final_log = fmt::format("[{}] {}\n", prefix, buffer);
+        log_file.WriteBytes(final_log.c_str(), final_log.size());
+    }
+}
+#else
+void WriteDebugLog(const char* fmt, ...)
+{
+}
+#endif
 
 namespace UICommon {
 
@@ -86,6 +131,57 @@ bool ExportGamesListJson(const std::vector<std::shared_ptr<const GameFile>>& gam
   }
 
   return true;
+}
+
+picojson::value ImportGamesListJson()
+{
+  WriteDebugLog("ImportGamesListJson: Starting to import games list from JSON");
+  
+  // Resolve input path: <UserConfigDir>/Config/games_list.json
+  const std::string input_path = File::GetUserPath(D_CONFIG_IDX) + "games_list.json";
+  WriteDebugLog(fmt::format("ImportGamesListJson: Looking for file at: {}", input_path).c_str());
+
+  // Check if file exists
+  if (!File::Exists(input_path))
+  {
+    WriteDebugLog("ImportGamesListJson: File does not exist");
+    return picojson::value{};
+  }
+
+  WriteDebugLog("ImportGamesListJson: File exists, attempting to read and parse");
+  
+  // Read and parse JSON file
+  picojson::value json_data;
+  std::string error;
+  if (!JsonFromFile(input_path, &json_data, &error))
+  {
+    WriteDebugLog(fmt::format("ImportGamesListJson: Failed to parse JSON file, error: {}", error).c_str());
+    return picojson::value{};
+  }
+
+  WriteDebugLog("ImportGamesListJson: Successfully parsed JSON file");
+  
+  // Log basic structure info
+  if (json_data.is<picojson::object>())
+  {
+    const auto& root_obj = json_data.get<picojson::object>();
+    auto games_it = root_obj.find("games");
+    if (games_it != root_obj.end() && games_it->second.is<picojson::array>())
+    {
+      const auto& games_array = games_it->second.get<picojson::array>();
+      WriteDebugLog(fmt::format("ImportGamesListJson: Found {} games in JSON file", games_array.size()).c_str());
+    }
+    else
+    {
+      WriteDebugLog("ImportGamesListJson: No 'games' array found in JSON");
+    }
+  }
+  else
+  {
+    WriteDebugLog("ImportGamesListJson: JSON root is not an object");
+  }
+
+  return json_data;
 }
 
 } // namespace UICommon
