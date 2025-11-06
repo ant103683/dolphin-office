@@ -1560,6 +1560,18 @@ bool NetPlayServer::AbortGameDigest()
 // called from ---GUI--- thread
 bool NetPlayServer::SetupNetSettings()
 {
+  INFO_LOG_FMT(NETPLAY, "Loading game settings for {:02x}.",
+               fmt::join(m_selected_game_identifier.sync_hash, ""));
+
+  NetPlay::NetSettings settings;
+
+#if IS_SERVER
+  // Server mode: use selected identifier directly, do not depend on GameFile
+  Config::AddLayer(ConfigLoaders::GenerateGlobalGameConfigLoader(
+      m_selected_game_identifier.game_id, m_selected_game_identifier.revision));
+  Config::AddLayer(ConfigLoaders::GenerateLocalGameConfigLoader(
+      m_selected_game_identifier.game_id, m_selected_game_identifier.revision));
+#else
   const auto game = m_dialog->FindGameFile(m_selected_game_identifier);
   if (game == nullptr)
   {
@@ -1569,16 +1581,12 @@ bool NetPlayServer::SetupNetSettings()
     return false;
   }
 
-  INFO_LOG_FMT(NETPLAY, "Loading game settings for {:02x}.",
-               fmt::join(m_selected_game_identifier.sync_hash, ""));
-
-  NetPlay::NetSettings settings;
-
   // Load GameINI so we can sync the settings from it
   Config::AddLayer(
       ConfigLoaders::GenerateGlobalGameConfigLoader(game->GetGameID(), game->GetRevision()));
   Config::AddLayer(
       ConfigLoaders::GenerateLocalGameConfigLoader(game->GetGameID(), game->GetRevision()));
+#endif
 
   // Copy all relevant settings
   settings.cpu_thread = Config::Get(Config::MAIN_CPU_THREAD);
@@ -1799,8 +1807,16 @@ bool NetPlayServer::StartGame()
 
   const u64 initial_rtc = GetInitialNetPlayRTC();
 
+#if IS_SERVER
+  // Server mode: derive region directory without relying on GameFile.
+  // Prefer configured fallback; region-specific handling is not required for hosting.
+  const DiscIO::Region used_region = Config::Get(Config::MAIN_FALLBACK_REGION);
+  const std::string region =
+      Config::GetDirectoryForRegion(Config::ToGameCubeRegion(used_region));
+#else
   const std::string region = Config::GetDirectoryForRegion(
       Config::ToGameCubeRegion(m_dialog->FindGameFile(m_selected_game_identifier)->GetRegion()));
+#endif
 
   // load host's GC SRAM
   SConfig::GetInstance().m_strSRAM = File::GetUserPath(F_GCSRAM_IDX);
@@ -1940,14 +1956,17 @@ std::optional<SaveSyncInfo> NetPlayServer::CollectSaveSyncInfo()
     }
   }
 
+#if !IS_SERVER
   sync_info.game = m_dialog->FindGameFile(m_selected_game_identifier);
   if (sync_info.game == nullptr)
   {
     PanicAlertFmtT("Selected game doesn't exist in game list!");
     return std::nullopt;
   }
+#endif
 
   sync_info.has_wii_save = false;
+#if !IS_SERVER
   if (m_settings.savedata_load && (sync_info.game->GetPlatform() == DiscIO::Platform::WiiDisc ||
                                    sync_info.game->GetPlatform() == DiscIO::Platform::WiiWAD ||
                                    sync_info.game->GetPlatform() == DiscIO::Platform::ELFOrDOL))
@@ -2005,6 +2024,7 @@ std::optional<SaveSyncInfo> NetPlayServer::CollectSaveSyncInfo()
       }
     }
   }
+#endif
 
   for (size_t i = 0; i < m_gba_config.size(); ++i)
   {
@@ -2042,9 +2062,16 @@ bool NetPlayServer::SyncSaveData(const SaveSyncInfo& sync_info)
   if (sync_info.save_count == 0)
     return true;
 
+#if IS_SERVER
+  // Server mode: compute region without GameFile
+  const DiscIO::Region game_region = Config::Get(Config::MAIN_FALLBACK_REGION);
+  const auto gamecube_region = Config::ToGameCubeRegion(game_region);
+  const std::string region = Config::GetDirectoryForRegion(gamecube_region);
+#else
   const auto game_region = sync_info.game->GetRegion();
   const auto gamecube_region = Config::ToGameCubeRegion(game_region);
   const std::string region = Config::GetDirectoryForRegion(gamecube_region);
+#endif
 
   for (ExpansionInterface::Slot slot : ExpansionInterface::MEMCARD_SLOTS)
   {
@@ -2095,7 +2122,11 @@ bool NetPlayServer::SyncSaveData(const SaveSyncInfo& sync_info)
       if (File::IsDirectory(path))
       {
         std::vector<std::string> files =
+#if IS_SERVER
+            GCMemcardDirectory::GetFileNamesForGameID(path + DIR_SEP, m_selected_game_identifier.game_id);
+#else
             GCMemcardDirectory::GetFileNamesForGameID(path + DIR_SEP, sync_info.game->GetGameID());
+#endif
 
         INFO_LOG_FMT(NETPLAY, "Sending data of GCI memcard {} in slot {} ({} files).", path,
                      is_slot_a ? 'A' : 'B', files.size());
@@ -2267,6 +2298,11 @@ bool NetPlayServer::SyncCodes()
   // Sync Codes is ticked, so set m_codes_synced to false
   m_codes_synced = false;
 
+  // Find all INI files
+#if IS_SERVER
+  const auto& game_id = m_selected_game_identifier.game_id;
+  const auto revision = m_selected_game_identifier.revision;
+#else
   // Get Game Path
   const auto game = m_dialog->FindGameFile(m_selected_game_identifier);
   if (game == nullptr)
@@ -2274,10 +2310,9 @@ bool NetPlayServer::SyncCodes()
     PanicAlertFmtT("Selected game doesn't exist in game list!");
     return false;
   }
-
-  // Find all INI files
   const auto game_id = game->GetGameID();
   const auto revision = game->GetRevision();
+#endif
   Common::IniFile globalIni;
   for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(game_id, revision))
     globalIni.Load(File::GetSysDirectory() + GAMESETTINGS_DIR DIR_SEP + filename, true);

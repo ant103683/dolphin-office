@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#define IS_SERVER 1
+#define IS_SERVER 0
 #define IS_CLIENT 0
 
 namespace Core {

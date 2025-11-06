@@ -67,8 +67,6 @@
 #include "VideoCommon/NetPlayGolfUI.h"
 #include "VideoCommon/VideoConfig.h"
 
-#define SERVER_SWITCH 1
-
 namespace
 {
 QString InetAddressToString(const Common::TraversalInetAddress& addr)
@@ -562,6 +560,7 @@ void NetPlayDialog::OnStart()
       return;
     }
 
+#if !IS_SERVER
     // 检查游戏文件是否存在 (这个检查可能重复，因为 UpdateGUI 已经检查了)
     const auto game = FindGameFile(m_current_game_identifier);
     if (!game)
@@ -569,7 +568,7 @@ void NetPlayDialog::OnStart()
       PanicAlertFmtT("Selected game doesn't exist in game list!");
       return;
     }
-
+#endif
     // 主机直接请求服务器开始游戏检查流程
     if (server->RequestStartGame())
       SetOptionsEnabled(false);  // 启动请求成功后禁用选项
@@ -1019,19 +1018,13 @@ void NetPlayDialog::OnMsgStartGame()
   auto server = Settings::Instance().GetNetPlayServer();
   // if (server && dbzUserManager::GetInstance().dbzConfig.is_server) {
 
-#ifdef SERVER_SWITCH
+#ifdef IS_SERVER
   if (server) 
     DisplayMessage(tr("Started game,Please ignore the server game stop!!!"), "blue");
 #else
   if (!server) 
     DisplayMessage(tr("Started game"), "green");
 #endif
-
-  // if (SERVER_SWITCH && server) {
-  //   DisplayMessage(tr("Started game,Please ignore the server game stop!!!"), "blue");
-  // } else {
-  //   DisplayMessage(tr("Started game"), "green");
-  // }
 
   g_netplay_chat_ui =
       std::make_unique<NetPlayChatUI>([this](const std::string& message) { SendMessage(message); });
@@ -1047,7 +1040,7 @@ void NetPlayDialog::OnMsgStartGame()
 
     if (client)
     {
-#if SERVER_SWITCH
+#if IS_SERVER
       if (server)
         return;
 #endif
