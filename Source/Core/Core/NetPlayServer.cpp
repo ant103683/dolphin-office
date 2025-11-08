@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "Core/NetPlayServer.h"
+#include "UICommon/GameListExporter.h"
 
 #include <algorithm>
 #include <chrono>
@@ -788,6 +789,78 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
     spac << msg;
 
     SendToClients(spac, player.pid);
+  }
+  break;
+
+  case MessageID::RequestChangeGame:
+  {
+    // Minimal payload: game_id + sync_hash (20 bytes)
+    std::string req_game_id;
+    packet >> req_game_id;
+    std::array<u8, 20> req_hash{};
+    for (u8& b : req_hash)
+      packet >> b;
+
+    bool exists = false;
+    std::string netplay_name;
+
+    const picojson::value json_data = UICommon::ImportGamesListJson();
+    if (json_data.is<picojson::object>())
+    {
+      const auto& root_obj = json_data.get<picojson::object>();
+      auto games_it = root_obj.find("games");
+      if (games_it != root_obj.end() && games_it->second.is<picojson::array>())
+      {
+        const auto& games_array = games_it->second.get<picojson::array>();
+        const std::string req_hash_hex = Common::SHA1::DigestToString(req_hash);
+        for (const auto& v : games_array)
+        {
+          if (!v.is<picojson::object>())
+            continue;
+          const auto& g = v.get<picojson::object>();
+          const auto id_it = g.find("game_id");
+          const auto hash_it = g.find("sync_hash");
+          if (id_it != g.end() && id_it->second.is<std::string>() &&
+              hash_it != g.end() && hash_it->second.is<std::string>())
+          {
+            std::string json_id = id_it->second.get<std::string>();
+            std::string json_hash = hash_it->second.get<std::string>();
+            std::string json_hash_upper = json_hash;
+            Common::ToUpper(&json_hash_upper);
+            std::string req_hash_upper = req_hash_hex;
+            Common::ToUpper(&req_hash_upper);
+            if (json_id == req_game_id && json_hash_upper == req_hash_upper)
+            {
+              exists = true;
+              const auto name_it = g.find("netplay_name");
+              netplay_name = (name_it != g.end() && name_it->second.is<std::string>()) ?
+                                 name_it->second.get<std::string>() : json_id;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (exists)
+    {
+      SyncIdentifier si{};
+      si.game_id = req_game_id;
+      si.sync_hash = req_hash;
+      si.dol_elf_size = 0;
+      si.revision = 0;
+      si.disc_number = 0;
+      si.is_datel = false;
+      ChangeGame(si, netplay_name);
+    }
+    else
+    {
+      sf::Packet resp;
+      resp << MessageID::ChangeGameNotFound;
+      resp << req_game_id;
+      Send(player.socket, resp);
+    }
+
   }
   break;
 

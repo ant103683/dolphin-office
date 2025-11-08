@@ -76,6 +76,7 @@ void GameListDialog::ConnectWidgets()
 
 void GameListDialog::PopulateGameList()
 {
+#if IS_SERVER
   std::string log_path = File::GetUserPath(D_LOGS_IDX);
   log_path += "savehash8.txt";
   File::CreateFullPath(log_path);
@@ -175,7 +176,21 @@ void GameListDialog::PopulateGameList()
     }
   }
   fp.close();
+#else
+  m_game_list->clear();
 
+  for (int i = 0; i < m_game_list_model.rowCount(QModelIndex()); i++)
+  {
+    std::shared_ptr<const UICommon::GameFile> game = m_game_list_model.GetGameFile(i);
+
+    auto* item =
+        new QListWidgetItem(QString::fromStdString(m_game_list_model.GetNetPlayName(*game)));
+    item->setData(Qt::UserRole, QVariant::fromValue(std::move(game)));
+    m_game_list->addItem(item);
+  }
+
+  m_game_list->sortItems();
+#endif
 }
 
 NetPlay::SyncIdentifier GameListDialog::GetSelectedGameSyncIdentifier() const
@@ -359,6 +374,13 @@ std::string GameListDialog::GetSelectedGameNetPlayName() const
   return netplay_name;
 #endif
 }
+
+const UICommon::GameFile& GameListDialog::GetSelectedGame() const
+{
+  auto items = m_game_list->selectedItems();
+  return *items[0]->data(Qt::UserRole).value<std::shared_ptr<const UICommon::GameFile>>();
+}
+
 
 int GameListDialog::exec()
 {

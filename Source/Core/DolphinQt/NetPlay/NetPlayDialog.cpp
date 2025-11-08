@@ -46,6 +46,7 @@
 #include "Core/NetPlayServer.h"
 #include "Core/SyncIdentifier.h"
 #include "Core/System.h"
+#include "Core/netplayManager.h"
 
 #include "DolphinQt/NetPlay/ChunkedProgressDialog.h"
 #include "DolphinQt/NetPlay/ClickBlurLabel.h"
@@ -443,14 +444,25 @@ void NetPlayDialog::ConnectWidgets()
     GameListDialog gld(m_game_list_model, this);
     if (gld.exec() == QDialog::Accepted)
     {
-      Settings& settings = Settings::Instance();
-
-      const std::string netplay_name = gld.GetSelectedGameNetPlayName();
+#if IS_CLIENT
+      // Client: send minimal request (game_id + sync_hash) to server
+      if (auto client = Settings::Instance().GetNetPlayClient())
+      {
+        // client->RequestChangeGameIdHash(sync_identifier.game_id, sync_identifier.sync_hash);
+        const UICommon::GameFile& game = gld.GetSelectedGame();
+        const NetPlay::SyncIdentifier sync_identifier = game.GetSyncIdentifier(); 
+        std::string game_id = sync_identifier.game_id;
+        std::array<u8, 20> sync_hash = sync_identifier.sync_hash;
+        client->RequestChangeGameIdHash(game_id, sync_hash);
+      }
+#else
       const NetPlay::SyncIdentifier sync_identifier = gld.GetSelectedGameSyncIdentifier();
-
+      const std::string netplay_name = gld.GetSelectedGameNetPlayName();
+      Settings& settings = Settings::Instance();
       settings.GetNetPlayServer()->ChangeGame(sync_identifier, netplay_name);
       Settings::GetQSettings().setValue(QStringLiteral("netplay/hostgame"),
                                         QString::fromStdString(netplay_name));
+#endif
     }
   });
 
@@ -641,7 +653,15 @@ void NetPlayDialog::show(std::string nickname, bool use_traversal)
   m_room_box->setHidden(!is_hosting);
   m_hostcode_label->setHidden(!is_hosting);
   m_hostcode_action_button->setHidden(!is_hosting);
+  
+#if IS_CLIENT
+  // Client can request change game
+  m_game_button->setEnabled(true);
+#else
+  // Host can change game
   m_game_button->setEnabled(is_hosting);
+#endif
+
   m_kick_button->setEnabled(false);
 
   SetOptionsEnabled(true);
@@ -971,7 +991,15 @@ void NetPlayDialog::SetOptionsEnabled(bool enabled)
   // Start button logic is handled in UpdateGUI
 
   // Enable/disable options only for the host for most settings
+  // "setEnabled(true)"" for client to request change game;
+#if IS_CLIENT
+  // Client can request change game
+  m_game_button->setEnabled(true);
+#else
+  // Host can change game
   m_game_button->setEnabled(enabled && is_host);
+#endif
+
   m_savedata_none_action->setEnabled(enabled && is_host);
   m_savedata_load_only_action->setEnabled(enabled && is_host);
   m_savedata_load_and_write_action->setEnabled(enabled && is_host);

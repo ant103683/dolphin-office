@@ -178,6 +178,11 @@ enum class MessageID : u8
   PauseSimulation = 0xAA,
   ResumeSimulation = 0xAB,
 
+  // Client requests to change game by minimal identifier
+  RequestChangeGame = 0xAE,
+  // Server notifies client that requested game does not exist on server list
+  ChangeGameNotFound = 0xAF,
+
 
   TimeBase = 0xB0,
   DesyncDetected = 0xB1,

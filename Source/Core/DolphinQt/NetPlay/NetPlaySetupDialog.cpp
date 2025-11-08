@@ -360,7 +360,15 @@ void NetPlaySetupDialog::accept()
     const auto dummy_game = std::make_shared<UICommon::GameFile>();
     emit Host(*dummy_game);
 #else
-    emit Host(*items[0]->data(Qt::UserRole).value<std::shared_ptr<const UICommon::GameFile>>());
+    {
+      auto sp = items[0]->data(Qt::UserRole).value<std::shared_ptr<UICommon::GameFile>>();
+      if (!sp)
+      {
+        ModalMessageBox::critical(this, tr("Error"), tr("Selected game entry is invalid."));
+        return;
+      }
+      emit Host(*sp);
+    }
 #endif
   }
 }
@@ -414,39 +422,12 @@ void NetPlaySetupDialog::PopulateGameList()
 
   m_host_games->sortItems();
 #else
-  // 原有实现（客户端模式）
-  {
-    std::string log_path = File::GetUserPath(D_LOGS_IDX);
-    log_path = "savehash8.txt";
-    File::CreateFullPath(log_path);
-    std::ofstream fp;
-    File::OpenFStream(fp, log_path, std::ios_base::app);
-    if (fp)
-    {
-        fp << "PopulateGameList called\n";
-        fp << "Game count: " << m_game_list_model.rowCount(QModelIndex()) << "\n";
-    }
-  }
-
   QSignalBlocker blocker(m_host_games);
 
   m_host_games->clear();
-  for (int i = 0; i < m_game_list_model.rowCount(QModelIndex()); i)
+  for (int i = 0; i < m_game_list_model.rowCount(QModelIndex()); i++)
   {
     std::shared_ptr<const UICommon::GameFile> game = m_game_list_model.GetGameFile(i);
-
-    {
-        std::string log_path = File::GetUserPath(D_LOGS_IDX);
-        log_path = "savehash8.txt";
-        File::CreateFullPath(log_path);
-        std::ofstream fp;
-        File::OpenFStream(fp, log_path, std::ios_base::app);
-        if (fp)
-        {
-            const std::string name = m_game_list_model.GetNetPlayName(*game);
-            fp << name << "\n";
-        }
-    }
 
     auto* item =
         new QListWidgetItem(QString::fromStdString(m_game_list_model.GetNetPlayName(*game)));
@@ -455,7 +436,6 @@ void NetPlaySetupDialog::PopulateGameList()
   }
 
   m_host_games->sortItems();
-#endif
 
   const QString selected_game =
       Settings::GetQSettings().value(QStringLiteral("netplay/hostgame"), QString{}).toString();
@@ -463,6 +443,56 @@ void NetPlaySetupDialog::PopulateGameList()
 
   if (find_list.count() > 0)
     m_host_games->setCurrentItem(find_list[0]);
+  #endif
+//   {
+//     std::string log_path = File::GetUserPath(D_LOGS_IDX);
+//     log_path = "savehash8.txt";
+//     File::CreateFullPath(log_path);
+//     std::ofstream fp;
+//     File::OpenFStream(fp, log_path, std::ios_base::app);
+//     if (fp)
+//     {
+//         fp << "PopulateGameList called\n";
+//         fp << "Game count: " << m_game_list_model.rowCount(QModelIndex()) << "\n";
+//     }
+//   }
+
+//   QSignalBlocker blocker(m_host_games);
+
+//   m_host_games->clear();
+//   for (int i = 0; i < m_game_list_model.rowCount(QModelIndex()); i)
+//   {
+//     std::shared_ptr<const UICommon::GameFile> game = m_game_list_model.GetGameFile(i);
+
+//     {
+//         std::string log_path = File::GetUserPath(D_LOGS_IDX);
+//         log_path = "savehash8.txt";
+//         File::CreateFullPath(log_path);
+//         std::ofstream fp;
+//         File::OpenFStream(fp, log_path, std::ios_base::app);
+//         if (fp)
+//         {
+//             const std::string name = m_game_list_model.GetNetPlayName(*game);
+//             fp << name << "\n";
+//         }
+//     }
+
+//     auto* item =
+//         new QListWidgetItem(QString::fromStdString(m_game_list_model.GetNetPlayName(*game)));
+//     auto game_nc = std::const_pointer_cast<UICommon::GameFile>(game);
+//     item->setData(Qt::UserRole, QVariant::fromValue(game_nc));
+//     m_host_games->addItem(item);
+//   }
+
+//   m_host_games->sortItems();
+// #endif
+
+//   const QString selected_game =
+//       Settings::GetQSettings().value(QStringLiteral("netplay/hostgame"), QString{}).toString();
+//   const auto find_list = m_host_games->findItems(selected_game, Qt::MatchFlag::MatchExactly);
+
+//   if (find_list.count() > 0)
+//     m_host_games->setCurrentItem(find_list[0]);
 }
 
 void NetPlaySetupDialog::ResetTraversalHost()

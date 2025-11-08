@@ -382,6 +382,14 @@ void NetPlayClient::OnData(sf::Packet& packet)
     OnChunkedDataAbort(packet);
     break;
 
+  case MessageID::ChangeGameNotFound:
+  {
+    std::string game_id;
+    packet >> game_id;
+    m_dialog->AppendChat(Common::GetStringT("Server does not have requested game: ") + game_id);
+    break;
+  }
+
   case MessageID::PadMapping:
     OnPadMapping(packet);
     break;
@@ -2868,6 +2876,25 @@ void NetPlayClient::RequestBufferChange(int new_buffer_value)
   packet << static_cast<s32>(new_buffer_value);
   Send(packet); // Assuming Send is a member function that takes sf::Packet by const reference or value
   INFO_LOG_FMT(NETPLAY, "Sent buffer change request to server: new_buffer_value = {}", new_buffer_value); // Corrected: Use {} for fmt
+}
+
+void NetPlayClient::RequestChangeGameIdHash(const std::string& game_id,
+                                            const std::array<u8, 20>& sync_hash)
+{
+  if (!IsConnected())
+  {
+    WARN_LOG_FMT(NETPLAY, "Not connected, cannot send change game request.");
+    return;
+  }
+
+  sf::Packet packet;
+  packet << MessageID::RequestChangeGame;
+  packet << game_id;
+  for (const u8& b : sync_hash)
+    packet << b;
+  Send(packet);
+  INFO_LOG_FMT(NETPLAY, "Requested change game: {} (hash={})", game_id,
+               Common::SHA1::DigestToString(sync_hash));
 }
 
 }  // namespace NetPlay
