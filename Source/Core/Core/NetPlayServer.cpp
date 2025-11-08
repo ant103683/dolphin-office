@@ -805,6 +805,7 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
     std::string netplay_name;
 
     const picojson::value json_data = UICommon::ImportGamesListJson();
+    SyncIdentifier si{};
     if (json_data.is<picojson::object>())
     {
       const auto& root_obj = json_data.get<picojson::object>();
@@ -834,7 +835,33 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
               exists = true;
               const auto name_it = g.find("netplay_name");
               netplay_name = (name_it != g.end() && name_it->second.is<std::string>()) ?
-                                 name_it->second.get<std::string>() : json_id;
+                                 name_it->second.get<std::string>() :
+                                 json_id;
+
+              si.game_id = req_game_id;
+              si.sync_hash = req_hash;
+
+              const auto dol_elf_size_it = g.find("dol_elf_size");
+              si.dol_elf_size =
+                  (dol_elf_size_it != g.end() && dol_elf_size_it->second.is<double>()) ?
+                      static_cast<u32>(dol_elf_size_it->second.get<double>()) :
+                      0;
+
+              const auto revision_it = g.find("revision");
+              si.revision = (revision_it != g.end() && revision_it->second.is<double>()) ?
+                                static_cast<u16>(revision_it->second.get<double>()) :
+                                0;
+
+              const auto disc_number_it = g.find("disc_number");
+              si.disc_number =
+                  (disc_number_it != g.end() && disc_number_it->second.is<double>()) ?
+                      static_cast<u8>(disc_number_it->second.get<double>()) :
+                      0;
+
+              const auto is_datel_it = g.find("is_datel");
+              si.is_datel = (is_datel_it != g.end() && is_datel_it->second.is<bool>()) ?
+                                is_datel_it->second.get<bool>() :
+                                false;
               break;
             }
           }
@@ -844,13 +871,6 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
 
     if (exists)
     {
-      SyncIdentifier si{};
-      si.game_id = req_game_id;
-      si.sync_hash = req_hash;
-      si.dol_elf_size = 0;
-      si.revision = 0;
-      si.disc_number = 0;
-      si.is_datel = false;
       ChangeGame(si, netplay_name);
     }
     else

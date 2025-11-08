@@ -748,6 +748,9 @@ void NetPlayDialog::UpdateGUI()
   bool game_can_start = game_selected && !game_running;
   m_start_button->setEnabled(game_can_start);
 
+  bool game_can_change = !game_running;
+  m_game_button->setEnabled(game_can_change);
+
   // Update Player List
   const auto players = client->GetPlayers();
 
