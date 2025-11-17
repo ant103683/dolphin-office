@@ -1613,6 +1613,8 @@ bool NetPlayServer::ChangeGame(const SyncIdentifier& sync_identifier,
   const std::string hash8 = hash_str.substr(0, 8);
   SConfig::GetInstance().SetSaveHash8(hash8);
 
+  NetplayManager::GetInstance().SetCurrentGame(m_selected_game_identifier, m_selected_game_name);
+
   // Debug logging similar to previous instrumentation
   const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
   File::WriteStringToFile(log_path, "[NPDEBUG] ChangeGame set SaveHash8=" + hash8 + "\n");

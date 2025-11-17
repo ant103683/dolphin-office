@@ -17,4 +17,24 @@ const Info<bool> MAIN_FOCUSED_HOTKEYS{{System::Main, "General", "HotkeysRequireF
 const Info<bool> MAIN_RECURSIVE_ISO_PATHS{{System::Main, "General", "RecursiveISOPaths"}, false};
 const Info<std::string> MAIN_CURRENT_STATE_PATH{{System::Main, "General", "CurrentStatePath"}, ""};
 
+const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_0{{System::Main, "Controllers", "GCPadLastPresetTitlePort0"}, ""};
+const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_1{{System::Main, "Controllers", "GCPadLastPresetTitlePort1"}, ""};
+const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_2{{System::Main, "Controllers", "GCPadLastPresetTitlePort2"}, ""};
+const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_3{{System::Main, "Controllers", "GCPadLastPresetTitlePort3"}, ""};
+
+const Info<std::string>& GetInfoForGCPadLastPresetTitle(int port)
+{
+  static const Info<std::string>* const infos[] = {
+      &MAIN_GCPAD_LAST_PRESET_TITLE_PORT_0,
+      &MAIN_GCPAD_LAST_PRESET_TITLE_PORT_1,
+      &MAIN_GCPAD_LAST_PRESET_TITLE_PORT_2,
+      &MAIN_GCPAD_LAST_PRESET_TITLE_PORT_3,
+  };
+  if (port < 0)
+    port = 0;
+  if (port > 3)
+    port = 3;
+  return *infos[port];
+}
+
 }  // namespace Config

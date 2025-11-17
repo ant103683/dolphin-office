@@ -7,6 +7,9 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <optional>
+
+#include "Core/SyncIdentifier.h"
 
 #define IS_SERVER 0
 #define IS_CLIENT 1
@@ -81,6 +84,8 @@ public:
   void setClientLoadStatus(LoadStatus status,int pid);
   bool setClientLoadStatusSuccess(int pid);
 
+  void SetCurrentGame(const SyncIdentifier& si, const std::string& netplay_name);
+
 public:
   // 客户端状态管理
   mutable std::vector<ClientState> m_client_states;
@@ -92,6 +97,19 @@ private:
 
   // Member variables for thread safety
   mutable std::mutex m_mutex;
+
+  struct CurrentGame
+  {
+    std::string game_id;
+    u16 revision = 0;
+    u8 disc_number = 0;
+    bool is_datel = false;
+    std::array<u8, 20> sync_hash{};
+    std::string hash8;
+    std::string name;
+  };
+
+  std::optional<CurrentGame> m_current_game;
 };
 
 }  // namespace NetPlay

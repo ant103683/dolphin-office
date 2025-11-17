@@ -21,4 +21,11 @@ extern const Info<bool> MAIN_FOCUSED_HOTKEYS;
 extern const Info<bool> MAIN_RECURSIVE_ISO_PATHS;
 extern const Info<std::string> MAIN_CURRENT_STATE_PATH;
 
+extern const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_0;
+extern const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_1;
+extern const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_2;
+extern const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_3;
+
+const Info<std::string>& GetInfoForGCPadLastPresetTitle(int port);
+
 }  // namespace Config

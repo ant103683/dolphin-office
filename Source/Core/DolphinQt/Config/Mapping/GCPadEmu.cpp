@@ -11,10 +11,15 @@
 #include <QJsonDocument>
 #include <QLabel>
 #include <QPushButton>
+#include <QSignalBlocker>
+#include <QStringList>
+#include <QTimer>
 
 #include "DolphinQt/Config/Mapping/GCPadCustomPresetDialog.h"
 #include "Common/FileUtil.h"
 #include "Common/Logging/Log.h"
+#include "Common/Config/Config.h"
+#include "Core/Config/UISettings.h"
 
 #include "Core/HW/GCPad.h"
 #include "Core/HW/GCPadEmu.h"
@@ -51,12 +56,26 @@ GCPadEmu::GCPadEmu(MappingWindow* window) : MappingWidget(window)
           &GCPadEmu::OnPresetChanged);
   connect(m_custom_mapping_button, &QPushButton::clicked, this,
           &GCPadEmu::OnCustomMappingButtonPressed);
+
+  QTimer::singleShot(0, this, [this] {
+    if (GetController())
+      OnPresetChanged(m_preset_combo->currentIndex());
+  });
 }
 
 void GCPadEmu::LoadPresets()
 {
-  std::string path = File::GetSysDirectory() + "/Profiles/GCPadPresets.json";
-  QFile file(QString::fromStdString(path));
+  const std::string user_dir = File::GetUserPath(D_USER_IDX) + std::string("Profiles/");
+  const std::string user_path = user_dir + std::string("GCPadPresets.json");
+  const std::string sys_path = File::GetSysDirectory() + std::string("/Profiles/GCPadPresets.json");
+
+  if (!File::Exists(user_path) && File::Exists(sys_path))
+  {
+    File::CreateFullPath(user_path);
+    File::CopyRegularFile(sys_path, user_path);
+  }
+
+  QFile file(QString::fromStdString(user_path));
   if (!file.open(QIODevice::ReadOnly))
   {
     //ERROR_LOG(COMMON, "Failed to open GCPadPresets.json at %s", path.c_str());
@@ -100,6 +119,31 @@ void GCPadEmu::CreateMainLayout()
     m_preset_combo->addItem(preset.title);
   }
 
+  {
+    const int port = GetPort();
+    const auto& info = (port == 0) ? Config::MAIN_GCPAD_LAST_PRESET_TITLE_PORT_0
+                         : (port == 1) ? Config::MAIN_GCPAD_LAST_PRESET_TITLE_PORT_1
+                         : (port == 2) ? Config::MAIN_GCPAD_LAST_PRESET_TITLE_PORT_2
+                                        : Config::MAIN_GCPAD_LAST_PRESET_TITLE_PORT_3;
+    const std::string last = Config::Get(info);
+    if (!last.empty())
+    {
+      int found = -1;
+      for (int i = 0; i < static_cast<int>(m_presets.size()); ++i)
+      {
+        if (m_presets[i].title.toStdString() == last)
+        {
+          found = i;
+          break;
+        }
+      }
+      if (found >= 0)
+      {
+        m_preset_combo->setCurrentIndex(found + 1);
+      }
+    }
+  }
+
   auto* preset_label = new QLabel(tr("Custom Game Key Mapping Template:"));
   m_custom_mapping_button = new QPushButton(tr("Custom Key Template"));
   layout->addWidget(preset_label, 0, 0);
@@ -114,6 +158,8 @@ void GCPadEmu::CreateMainLayout()
   }
 
   setLayout(layout);
+
+  OnPresetChanged(m_preset_combo->currentIndex());
 }
 
 void GCPadEmu::OnPresetChanged(int index)
@@ -131,13 +177,9 @@ void GCPadEmu::OnPresetChanged(int index)
     }
   }
 
-  if (index == 0)  // Default
+  if (index > 0 && index <= static_cast<int>(m_presets.size()))
   {
-    // UI is already reset to default, so just refresh it
-  }
-  else
-  {
-    const auto& preset = m_presets[index - 1];
+    const auto& preset = m_presets.at(index - 1);
     const auto& mappings = preset.mappings;
 
     for (auto& group : controller->groups)
@@ -151,6 +193,18 @@ void GCPadEmu::OnPresetChanged(int index)
         }
       }
     }
+  }
+
+  {
+    const int port = GetPort();
+    const auto& info = (port == 0) ? Config::MAIN_GCPAD_LAST_PRESET_TITLE_PORT_0
+                         : (port == 1) ? Config::MAIN_GCPAD_LAST_PRESET_TITLE_PORT_1
+                         : (port == 2) ? Config::MAIN_GCPAD_LAST_PRESET_TITLE_PORT_2
+                                        : Config::MAIN_GCPAD_LAST_PRESET_TITLE_PORT_3;
+    if (index > 0 && index <= static_cast<int>(m_presets.size()))
+      Config::SetBase(info, m_presets.at(index - 1).title.toStdString());
+    else
+      Config::SetBase(info, std::string());
   }
 
   auto* grid_layout = static_cast<QGridLayout*>(layout());
@@ -177,14 +231,18 @@ void GCPadEmu::OnCustomMappingButtonPressed()
   GCPadCustomPresetDialog dialog(this);
   if (dialog.exec() == QDialog::Accepted)
   {
-    m_preset_combo->clear();
-    m_preset_combo->addItem(tr("Default"));
-    m_presets.clear();
-    LoadPresets();
-    for (const auto& preset : m_presets)
     {
-      m_preset_combo->addItem(preset.title);
+      QSignalBlocker blocker(m_preset_combo);
+      m_preset_combo->clear();
+      m_preset_combo->addItem(tr("Default"));
+      m_presets.clear();
+      LoadPresets();
+      for (const auto& preset : m_presets)
+      {
+        m_preset_combo->addItem(preset.title);
+      }
     }
+    m_preset_combo->setCurrentIndex(0);
   }
 }
 
@@ -202,3 +260,4 @@ InputConfig* GCPadEmu::GetConfig()
 {
   return Pad::GetConfig();
 }
+#include "Core/Config/UISettings.h"

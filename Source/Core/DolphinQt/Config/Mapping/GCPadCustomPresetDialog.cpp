@@ -137,8 +137,10 @@ void GCPadCustomPresetDialog::CreateLayout()
 
 void GCPadCustomPresetDialog::Save()
 {
-  std::string path = File::GetSysDirectory() + "/Profiles/GCPadPresets.json";
-  QFile file(QString::fromStdString(path));
+  const std::string user_dir = File::GetUserPath(D_USER_IDX) + std::string("Profiles/");
+  const std::string user_path = user_dir + std::string("GCPadPresets.json");
+  File::CreateDir(user_dir);
+  QFile file(QString::fromStdString(user_path));
 
   QJsonDocument doc;
   if (file.open(QIODevice::ReadOnly))
