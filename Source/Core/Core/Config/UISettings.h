@@ -25,6 +25,10 @@ extern const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_0;
 extern const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_1;
 extern const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_2;
 extern const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_3;
+extern const Info<std::string> MAIN_GCPAD_LAST_PRESET_ID_PORT_0;
+extern const Info<std::string> MAIN_GCPAD_LAST_PRESET_ID_PORT_1;
+extern const Info<std::string> MAIN_GCPAD_LAST_PRESET_ID_PORT_2;
+extern const Info<std::string> MAIN_GCPAD_LAST_PRESET_ID_PORT_3;
 
 const Info<std::string>& GetInfoForGCPadLastPresetTitle(int port);
 

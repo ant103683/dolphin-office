@@ -21,6 +21,10 @@ const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_0{{System::Main, "Cont
 const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_1{{System::Main, "Controllers", "GCPadLastPresetTitlePort1"}, ""};
 const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_2{{System::Main, "Controllers", "GCPadLastPresetTitlePort2"}, ""};
 const Info<std::string> MAIN_GCPAD_LAST_PRESET_TITLE_PORT_3{{System::Main, "Controllers", "GCPadLastPresetTitlePort3"}, ""};
+const Info<std::string> MAIN_GCPAD_LAST_PRESET_ID_PORT_0{{System::Main, "Controllers", "GCPadLastPresetIdPort0"}, ""};
+const Info<std::string> MAIN_GCPAD_LAST_PRESET_ID_PORT_1{{System::Main, "Controllers", "GCPadLastPresetIdPort1"}, ""};
+const Info<std::string> MAIN_GCPAD_LAST_PRESET_ID_PORT_2{{System::Main, "Controllers", "GCPadLastPresetIdPort2"}, ""};
+const Info<std::string> MAIN_GCPAD_LAST_PRESET_ID_PORT_3{{System::Main, "Controllers", "GCPadLastPresetIdPort3"}, ""};
 
 const Info<std::string>& GetInfoForGCPadLastPresetTitle(int port)
 {
