@@ -1619,6 +1619,69 @@ bool NetPlayServer::ChangeGame(const SyncIdentifier& sync_identifier,
   const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
   File::WriteStringToFile(log_path, "[NPDEBUG] ChangeGame set SaveHash8=" + hash8 + "\n");
 
+  {
+    const std::string gid = m_selected_game_identifier.game_id;
+    if (gid.size() == 6)
+    {
+      const u32 type_high = 0x00010000u;
+      const u32 id_low = (static_cast<u8>(gid[0]) << 24) | (static_cast<u8>(gid[1]) << 16) |
+                         (static_cast<u8>(gid[2]) << 8) | static_cast<u8>(gid[3]);
+      const u64 title_id = (static_cast<u64>(type_high) << 32) | static_cast<u64>(id_low);
+
+      IOS::HLE::Kernel ios;
+      if (!ios.GetESCore().FindInstalledTMD(title_id).IsValid())
+      {
+        std::vector<u8> tmd_bytes(sizeof(IOS::ES::TMDHeader));
+        auto put_u32 = [&tmd_bytes](size_t off, u32 v) {
+          tmd_bytes[off + 0] = static_cast<u8>((v >> 24) & 0xff);
+          tmd_bytes[off + 1] = static_cast<u8>((v >> 16) & 0xff);
+          tmd_bytes[off + 2] = static_cast<u8>((v >> 8) & 0xff);
+          tmd_bytes[off + 3] = static_cast<u8>(v & 0xff);
+        };
+        auto put_u64 = [&put_u32](size_t off, u64 v) {
+          put_u32(off + 0, static_cast<u32>((v >> 32) & 0xffffffffu));
+          put_u32(off + 4, static_cast<u32>(v & 0xffffffffu));
+        };
+        auto put_u16 = [&tmd_bytes](size_t off, u16 v) {
+          tmd_bytes[off + 0] = static_cast<u8>((v >> 8) & 0xff);
+          tmd_bytes[off + 1] = static_cast<u8>(v & 0xff);
+        };
+
+        put_u32(0, static_cast<u32>(IOS::SignatureType::RSA2048));
+        tmd_bytes[offsetof(IOS::ES::TMDHeader, tmd_version)] = 1;
+        tmd_bytes[offsetof(IOS::ES::TMDHeader, ca_crl_version)] = 0;
+        tmd_bytes[offsetof(IOS::ES::TMDHeader, signer_crl_version)] = 0;
+        tmd_bytes[offsetof(IOS::ES::TMDHeader, is_vwii)] = 0;
+        put_u64(offsetof(IOS::ES::TMDHeader, ios_id), 0x000000010000003aULL);
+        put_u64(offsetof(IOS::ES::TMDHeader, title_id), title_id);
+        put_u32(offsetof(IOS::ES::TMDHeader, title_flags), IOS::ES::TITLE_TYPE_DEFAULT);
+        tmd_bytes[offsetof(IOS::ES::TMDHeader, group_id) + 0] = static_cast<u8>(gid[4]);
+        tmd_bytes[offsetof(IOS::ES::TMDHeader, group_id) + 1] = static_cast<u8>(gid[5]);
+        put_u16(offsetof(IOS::ES::TMDHeader, region), 0);
+        put_u32(offsetof(IOS::ES::TMDHeader, access_rights), 0);
+        put_u16(offsetof(IOS::ES::TMDHeader, title_version), 1);
+        put_u16(offsetof(IOS::ES::TMDHeader, num_contents), 0);
+        put_u16(offsetof(IOS::ES::TMDHeader, boot_index), 0);
+
+        constexpr IOS::HLE::FS::Modes modes{IOS::HLE::FS::Mode::ReadWrite, IOS::HLE::FS::Mode::ReadWrite,
+                                            IOS::HLE::FS::Mode::None};
+        const std::string tmp_path = "/tmp/title.tmd";
+        auto tmp_file = ios.GetFS()->CreateAndOpenFile(IOS::PID_KERNEL, IOS::PID_KERNEL, tmp_path, modes);
+        if (tmp_file && tmp_file->Write(tmd_bytes.data(), tmd_bytes.size()))
+        {
+          const std::string tmd_dir = Common::GetTitleContentPath(title_id);
+          const std::string tmd_path = Common::GetTMDFileName(title_id);
+          ios.GetFS()->CreateFullPath(IOS::PID_KERNEL, IOS::PID_KERNEL, tmd_path, 0,
+                                      {IOS::HLE::FS::Mode::ReadWrite, IOS::HLE::FS::Mode::ReadWrite,
+                                       IOS::HLE::FS::Mode::Read});
+          ios.GetFS()->SetMetadata(IOS::PID_KERNEL, tmd_dir, IOS::PID_KERNEL, IOS::PID_KERNEL, 0,
+                                   modes);
+          ios.GetFS()->Rename(IOS::PID_KERNEL, IOS::PID_KERNEL, tmp_path, tmd_path);
+        }
+      }
+    }
+  }
+
   // send changed game to clients
   sf::Packet spac;
   spac << MessageID::ChangeGame;
@@ -2116,6 +2179,69 @@ std::optional<SaveSyncInfo> NetPlayServer::CollectSaveSyncInfo()
       {
         sync_info.redirected_save =
             DiscIO::Riivolution::ExtractSavegameRedirect(boot_params->riivolution_patches);
+      }
+    }
+  }
+#else
+  if (m_settings.savedata_load)
+  {
+    INFO_LOG_FMT(NETPLAY, "Adding Wii saves (server mode).");
+
+    sync_info.has_wii_save = true;
+    ++sync_info.save_count;
+
+    sync_info.configured_fs = IOS::HLE::FS::MakeFileSystem(IOS::HLE::FS::Location::Configured);
+    {
+      IOS::HLE::Kernel ios;
+      if (m_settings.savedata_sync_all_wii)
+      {
+        for (const u64 title : ios.GetESCore().GetInstalledTitles())
+        {
+          auto save = WiiSave::MakeNandStorage(sync_info.configured_fs.get(), title);
+          if (save && save->ReadHeader().has_value() && save->ReadBkHeader().has_value() &&
+              save->ReadFiles().has_value())
+          {
+            sync_info.wii_saves.emplace_back(title, std::move(save));
+          }
+          else
+          {
+            INFO_LOG_FMT(NETPLAY, "Skipping Wii save of title {:016x}.", title);
+          }
+        }
+      }
+      else
+      {
+        for (const u64 title : ios.GetESCore().GetInstalledTitles())
+        {
+          const auto tmd = ios.GetESCore().FindInstalledTMD(title);
+          if (!tmd.IsValid())
+            continue;
+          if (tmd.GetGameID() != m_selected_game_identifier.game_id)
+            continue;
+
+          auto save = WiiSave::MakeNandStorage(sync_info.configured_fs.get(), title);
+          if (save && save->ReadHeader().has_value() && save->ReadBkHeader().has_value() &&
+              save->ReadFiles().has_value())
+          {
+            sync_info.wii_saves.emplace_back(title, std::move(save));
+          }
+          else
+          {
+            INFO_LOG_FMT(NETPLAY, "Skipping Wii save of title {:016x}.", title);
+          }
+        }
+      }
+    }
+
+    {
+      auto file = sync_info.configured_fs->OpenFile(
+          IOS::PID_KERNEL, IOS::PID_KERNEL, Common::GetMiiDatabasePath(), IOS::HLE::FS::Mode::Read);
+      if (file)
+      {
+        std::vector<u8> file_data(file->GetStatus()->size);
+        if (!file->Read(file_data.data(), file_data.size()))
+          return std::nullopt;
+        sync_info.mii_data = std::move(file_data);
       }
     }
   }

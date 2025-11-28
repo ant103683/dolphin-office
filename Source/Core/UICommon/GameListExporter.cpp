@@ -43,7 +43,11 @@ void WriteDebugLog(const char* fmt, ...)
 
         time_t now = time(0);
         char dt[32];
-        ctime_s(dt, sizeof(dt), &now);
+#if defined(_WIN32)
+    ctime_s(dt, sizeof(dt), &now);
+#else
+    ctime_r(&now, dt);
+#endif
         std::string prefix = std::string(dt);
         if (!prefix.empty() && prefix.back() == '\n')
         {
