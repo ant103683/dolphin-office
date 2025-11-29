@@ -6,15 +6,18 @@
 #include <ctime>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 
 #include <fmt/format.h>
 #include "Common/FileUtil.h"
 #include "Common/IOFile.h"
 #include "Common/JsonUtil.h"
+#include "Common/StringUtil.h"
 #include "Common/Crypto/SHA1.h"
 #include "Core/TitleDatabase.h"
 #include "DiscIO/Enums.h"
+#include "DiscIO/Volume.h"
 #include "UICommon/GameFile.h"
 
 #if 1
@@ -120,6 +123,41 @@ bool ExportGamesListJson(const std::vector<std::shared_ptr<const GameFile>>& gam
     sync_obj["is_datel"] = picojson::value{sync_id.is_datel};
     g["sync_identifier"] = picojson::value{sync_obj};
     g["region"] = picojson::value{RegionToString(game->GetRegion())};
+
+    if (game->GetPlatform() == DiscIO::Platform::WiiDisc ||
+        game->GetPlatform() == DiscIO::Platform::WiiWAD)
+    {
+      auto vol = DiscIO::CreateVolume(game->GetFilePath());
+      if (vol)
+      {
+        const auto part = vol->GetGamePartition();
+        const auto tmd = vol->GetTMD(part);
+        const auto ticket = vol->GetTicket(part);
+        const auto cert_chain = vol->GetCertificateChain(part);
+        if (tmd.IsValid())
+        {
+          const auto& tmd_bytes = tmd.GetBytes();
+          std::string tmd_hex = ArrayToString(tmd_bytes.data(), static_cast<u32>(tmd_bytes.size()),
+                                              std::numeric_limits<int>::max(), false);
+          g["tmd"] = picojson::value{tmd_hex};
+          g["tmd_size"] = picojson::value{static_cast<double>(tmd_bytes.size())};
+        }
+        if (ticket.IsValid())
+        {
+          const auto& ticket_bytes = ticket.GetBytes();
+          std::string ticket_hex =
+              ArrayToString(ticket_bytes.data(), static_cast<u32>(ticket_bytes.size()),
+                            std::numeric_limits<int>::max(), false);
+          g["ticket"] = picojson::value{ticket_hex};
+        }
+        if (!cert_chain.empty())
+        {
+          std::string cert_hex = ArrayToString(cert_chain.data(), static_cast<u32>(cert_chain.size()),
+                                               std::numeric_limits<int>::max(), false);
+          g["cert"] = picojson::value{cert_hex};
+        }
+      }
+    }
 
     arr.emplace_back(g);
   }

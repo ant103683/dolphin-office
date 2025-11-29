@@ -19,6 +19,8 @@
 #include "Common/NandPaths.h"
 #include "Common/ScopeGuard.h"
 #include "Common/StringUtil.h"
+#include "Common/FileUtil.h"
+#include "Common/IOFile.h"
 #include "Core/IOS/ES/Formats.h"
 #include "Core/IOS/FS/FileSystemProxy.h"
 #include "Core/IOS/Uids.h"
@@ -40,13 +42,32 @@ static ES::TMDReader FindTMD(FSCore& fs, const std::string& tmd_path, Ticks tick
 
 ES::TMDReader ESCore::FindImportTMD(u64 title_id, Ticks ticks) const
 {
-  return FindTMD(m_ios.GetFSCore(), Common::GetImportTitlePath(title_id) + "/content/title.tmd",
-                 ticks);
+  const std::string p = Common::GetImportTitlePath(title_id) + "/content/title.tmd";
+  {
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    File::IOFile lf(log_path, "ab");
+    if (lf)
+    {
+      const std::string line = fmt::format("[NPDEBUG] FindImportTMD: path='{}'\n", p);
+      lf.WriteBytes(line.data(), line.size());
+    }
+  }
+  return FindTMD(m_ios.GetFSCore(), p, ticks);
 }
 
 ES::TMDReader ESCore::FindInstalledTMD(u64 title_id, Ticks ticks) const
 {
-  return FindTMD(m_ios.GetFSCore(), Common::GetTMDFileName(title_id), ticks);
+  const std::string p = Common::GetTMDFileName(title_id);
+  {
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    File::IOFile lf(log_path, "ab");
+    if (lf)
+    {
+      const std::string line = fmt::format("[NPDEBUG] FindInstalledTMD: path='{}'\n", p);
+      lf.WriteBytes(line.data(), line.size());
+    }
+  }
+  return FindTMD(m_ios.GetFSCore(), p, ticks);
 }
 
 ES::TicketReader ESCore::FindSignedTicket(u64 title_id, std::optional<u8> desired_version) const
