@@ -361,7 +361,7 @@ void NetPlaySetupDialog::accept()
     emit Host(*dummy_game);
 #else
     {
-      auto sp = items[0]->data(Qt::UserRole).value<std::shared_ptr<UICommon::GameFile>>();
+      auto sp = items[0]->data(Qt::UserRole).value<std::shared_ptr<const UICommon::GameFile>>();
       if (!sp)
       {
         ModalMessageBox::critical(this, tr("Error"), tr("Selected game entry is invalid."));
