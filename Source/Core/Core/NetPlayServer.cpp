@@ -49,6 +49,11 @@
 #include "Core/GeckoCodeConfig.h"
 #include "Core/HW/EXI/EXI.h"
 #include "Core/HW/EXI/EXI_Device.h"
+#include "Core/Core.h"
+#include "Core/System.h"
+#include "Core/IOS/FS/FileSystem.h"
+#include "Core/IOS/FS/HostBackend/FS.h"
+#include "Core/NetPlayUpload.h"
 #include "NetplayManager.h"
 #ifdef HAS_LIBMGBA
 #include "Core/HW/GBACore.h"
@@ -1447,6 +1452,104 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
 
     switch (sub_id)
     {
+    case SyncSaveDataID::UploadIntent:
+    {
+      const bool allowed = m_settings.savedata_write;
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+        File::IOFile lf(log_path, "ab");
+        if (lf)
+        {
+          const std::string line = fmt::format("[SERVER] UploadIntent allowed={} pid={}\n", allowed, player.pid);
+          lf.WriteBytes(line.data(), line.size());
+        }
+      }
+      if (m_dialog)
+        m_dialog->AppendChat(allowed ? "允许上传存档，开始等待数据..."
+                                     : "拒绝上传存档：未启用写回主机存档");
+      sf::Packet resp;
+      resp << MessageID::SyncSaveData;
+      resp << (allowed ? SyncSaveDataID::AllowUpload : SyncSaveDataID::Failure);
+      Send(player.socket, resp);
+    }
+    break;
+
+    case SyncSaveDataID::WiiData:
+    {
+      std::vector<u64> titles;
+      const std::string redirect_target = File::GetUserPath(D_USER_IDX) + "RedirectSession" DIR_SEP;
+      const std::string temp_root = File::GetUserPath(D_USER_IDX) + "WiiUploadSession" DIR_SEP;
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+        File::IOFile lf(log_path, "ab");
+        if (lf)
+        {
+          const std::string line = fmt::format("[SERVER] WiiData recv temp_root='{}' redirect='{}'\n", temp_root, redirect_target);
+          lf.WriteBytes(line.data(), line.size());
+        }
+      }
+      if (m_dialog)
+        m_dialog->AppendChat(Common::FmtFormatT("收到上传数据，开始解包到：{0}，重定向：{1}", temp_root,
+                                               redirect_target));
+      auto temp_fs = std::make_unique<IOS::HLE::FS::HostFileSystem>(temp_root);
+
+      const bool decode_ok = NetPlayUpload::ServerDecodeWiiSaveUploadPacketToFS(
+          packet, temp_fs.get(), redirect_target, &titles);
+
+      if (!decode_ok)
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+        File::IOFile lf(log_path, "ab");
+        if (lf)
+        {
+          const std::string line = "[SERVER] WiiData decode failed\n";
+          lf.WriteBytes(line.data(), line.size());
+        }
+        if (m_dialog)
+          m_dialog->AppendChat("上传解包失败");
+        sf::Packet resp;
+        resp << MessageID::SyncSaveData;
+        resp << SyncSaveDataID::Failure;
+        Send(player.socket, resp);
+        break;
+      }
+
+      ENetPeer* sock = player.socket;
+      if (m_dialog)
+        m_dialog->AppendChat("解包成功，开始覆盖主机存档...");
+      std::thread([this, sock, titles = std::move(titles), temp_fs = std::move(temp_fs)]() mutable {
+        {
+          const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+          File::IOFile lf(log_path, "ab");
+          if (lf)
+          {
+            const std::string line = fmt::format("[SERVER] Apply start titles={}\n", fmt::join(titles, ","));
+            lf.WriteBytes(line.data(), line.size());
+          }
+        }
+        auto configured_fs = IOS::HLE::FS::MakeFileSystem(IOS::HLE::FS::Location::Configured);
+        const bool apply_ok = NetPlayUpload::ServerApplyUploadedWiiSaves(
+            temp_fs.get(), configured_fs.get(), titles, true);
+
+        if (m_dialog)
+          m_dialog->AppendChat(apply_ok ? "上传存档应用成功" : "上传存档应用失败");
+        {
+          const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+          File::IOFile lf(log_path, "ab");
+          if (lf)
+          {
+            const std::string line = fmt::format("[SERVER] Apply done ok={}\n", apply_ok);
+            lf.WriteBytes(line.data(), line.size());
+          }
+        }
+        sf::Packet resp;
+        resp << MessageID::SyncSaveData;
+        resp << (apply_ok ? SyncSaveDataID::Success : SyncSaveDataID::Failure);
+        Send(sock, resp);
+      }).detach();
+    }
+    break;
+
     case SyncSaveDataID::Success:
     {
       if (m_start_pending)

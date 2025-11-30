@@ -224,7 +224,9 @@ enum class SyncSaveDataID : u8
   RawData = 3,
   GCIData = 4,
   WiiData = 5,
-  GBAData = 6
+  GBAData = 6,
+  UploadIntent = 7,
+  AllowUpload = 8
 };
 
 enum class SyncCodeID : u8

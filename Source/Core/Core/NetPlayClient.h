@@ -188,6 +188,8 @@ public:
   // Request server to change game by minimal identifier (game_id + sync_hash)
   void RequestChangeGameIdHash(const std::string& game_id, const std::array<u8, 20>& sync_hash);
 
+  void RequestWiiSaveUpload();
+
 protected:
   struct AsyncQueueEntry
   {

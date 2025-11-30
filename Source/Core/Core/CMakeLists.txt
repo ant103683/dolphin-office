@@ -561,7 +561,11 @@ add_library(core
   WiiRoot.h
   WiiUtils.cpp
   WiiUtils.h
- "NetplayManager.cpp" "NetplayManager.h")
+ NetplayManager.cpp
+ NetplayManager.h
+ NetPlayUpload.cpp
+ NetPlayUpload.h
+ )
 
 if(_M_X86_64)
   target_sources(core PRIVATE
