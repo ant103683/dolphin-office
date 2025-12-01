@@ -53,6 +53,7 @@
 #include "Core/HW/GBACore.h"
 #endif
 #include "Core/HW/GBAPad.h"
+#include "Core/NetPlayUpload.h"
 #include "Core/HW/GCMemcard/GCMemcard.h"
 #include "Core/HW/GCPad.h"
 #include "Core/HW/SI/SI.h"
@@ -66,6 +67,7 @@
 #include "Core/HW/WiimoteReal/WiimoteReal.h"
 #include "Core/IOS/FS/FileSystem.h"
 #include "Core/IOS/FS/HostBackend/FS.h"
+#include "Core/IOS/ES/ES.h"
 #include "Core/IOS/USB/Bluetooth/BTEmu.h"
 #include "Core/IOS/Uids.h"
 #include "Core/Movie.h"
@@ -381,6 +383,14 @@ void NetPlayClient::OnData(sf::Packet& packet)
   case MessageID::ChunkedDataAbort:
     OnChunkedDataAbort(packet);
     break;
+
+  case MessageID::ChangeGameNotFound:
+  {
+    std::string game_id;
+    packet >> game_id;
+    m_dialog->AppendChat(Common::GetStringT("Server does not have requested game: ") + game_id);
+    break;
+  }
 
   case MessageID::PadMapping:
     OnPadMapping(packet);
@@ -1084,6 +1094,56 @@ void NetPlayClient::OnSyncSaveData(sf::Packet& packet)
     OnSyncSaveDataGBA(packet);
     break;
 
+  case SyncSaveDataID::Success:
+    break;
+
+  case SyncSaveDataID::Failure:
+    break;
+
+  case SyncSaveDataID::AllowUpload:
+  {
+    auto* ios = Core::System::GetInstance().GetIOS();
+    IOS::HLE::FS::FileSystem* fs_for_upload = m_wii_sync_fs ? m_wii_sync_fs.get() : ios->GetFS().get();
+
+    std::vector<u64> titles_for_upload = m_wii_sync_titles;
+    if (titles_for_upload.empty())
+    {
+      titles_for_upload = ios->GetESCore().GetInstalledTitles();
+      if (m_dialog)
+      {
+        m_dialog->AppendChat(Common::FmtFormatT("允许上传：未检测到同步标题，改用会话FS枚举，共{0}项", titles_for_upload.size()));
+      }
+    }
+
+    std::string redirect_path_for_upload = m_wii_sync_redirect_folder;
+    if (redirect_path_for_upload.empty())
+    {
+      redirect_path_for_upload = File::GetUserPath(D_USER_IDX) + "RedirectSession" DIR_SEP;
+      const bool redirect_exists = File::IsDirectory(redirect_path_for_upload);
+      if (m_dialog)
+      {
+        m_dialog->AppendChat(Common::FmtFormatT("重定向目录回退：{0} {1}", redirect_path_for_upload,
+                                               redirect_exists ? "存在" : "不存在"));
+      }
+    }
+
+    sf::Packet upload;
+    const bool ok = NetPlayUpload::BuildClientWiiSaveUploadPacket(
+        fs_for_upload, titles_for_upload, redirect_path_for_upload, upload);
+    if (ok)
+    {
+      SendAsync(std::move(upload));
+    }
+    else
+    {
+      sf::Packet resp;
+      resp << MessageID::SyncSaveData;
+      resp << SyncSaveDataID::Failure;
+      SendAsync(std::move(resp));
+    }
+  }
+  break;
+
   default:
     PanicAlertFmtT("Unknown SYNC_SAVE_DATA message received with id: {0}", static_cast<u8>(sub_id));
     break;
@@ -1786,6 +1846,14 @@ void NetPlayClient::SendStopGamePacket()
   sf::Packet packet;
   packet << MessageID::StopGame;
 
+  SendAsync(std::move(packet));
+}
+
+void NetPlayClient::RequestWiiSaveUpload()
+{
+  sf::Packet packet;
+  packet << MessageID::SyncSaveData;
+  packet << SyncSaveDataID::UploadIntent;
   SendAsync(std::move(packet));
 }
 
@@ -2868,6 +2936,25 @@ void NetPlayClient::RequestBufferChange(int new_buffer_value)
   packet << static_cast<s32>(new_buffer_value);
   Send(packet); // Assuming Send is a member function that takes sf::Packet by const reference or value
   INFO_LOG_FMT(NETPLAY, "Sent buffer change request to server: new_buffer_value = {}", new_buffer_value); // Corrected: Use {} for fmt
+}
+
+void NetPlayClient::RequestChangeGameIdHash(const std::string& game_id,
+                                            const std::array<u8, 20>& sync_hash)
+{
+  if (!IsConnected())
+  {
+    WARN_LOG_FMT(NETPLAY, "Not connected, cannot send change game request.");
+    return;
+  }
+
+  sf::Packet packet;
+  packet << MessageID::RequestChangeGame;
+  packet << game_id;
+  for (const u8& b : sync_hash)
+    packet << b;
+  Send(packet);
+  INFO_LOG_FMT(NETPLAY, "Requested change game: {} (hash={})", game_id,
+               Common::SHA1::DigestToString(sync_hash));
 }
 
 }  // namespace NetPlay

@@ -36,4 +36,18 @@ class GameFile;
 // handles threading if necessary.
 bool ExportGamesListJson(const std::vector<std::shared_ptr<const GameFile>>& games);
 
+// Reads the games list from Config/games_list.json under the user's configuration directory.
+// Returns a picojson::value containing the parsed JSON data, or an empty value if the file
+// doesn't exist or parsing fails.
+//
+// The returned JSON structure matches the format produced by ExportGamesListJson:
+// {
+//   "generated_at": "ISO-8601 timestamp",
+//   "games": [
+//       { "netplay_name": "Game Name", "game_id": "GMSE01", ... },
+//       ...
+//   ]
+// }
+picojson::value ImportGamesListJson();
+
 } // namespace UICommon

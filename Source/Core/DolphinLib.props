@@ -440,6 +440,7 @@
     <ClInclude Include="Core\NetPlayProto.h" />
     <ClInclude Include="Core\NetPlayServer.h" />
     <ClInclude Include="Core\NetplayManager.h" />
+    <ClInclude Include="Core\NetPlayUpload.h" />
     <ClInclude Include="Core\NetworkCaptureLogger.h" />
     <ClInclude Include="Core\PatchEngine.h" />
     <ClInclude Include="Core\PowerPC\BreakPoints.h" />
@@ -1118,6 +1119,7 @@
     <ClCompile Include="Core\NetPlayCommon.cpp" />
     <ClCompile Include="Core\NetPlayServer.cpp" />
     <ClCompile Include="Core\NetplayManager.cpp" />
+    <ClCompile Include="Core\NetPlayUpload.cpp" />
     <ClCompile Include="Core\NetworkCaptureLogger.cpp" />
     <ClCompile Include="Core\PatchEngine.cpp" />
     <ClCompile Include="Core\PowerPC\BreakPoints.cpp" />

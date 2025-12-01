@@ -109,6 +109,7 @@ private:
   void ConnectWidgets();
   void OnChat();
   void OnStart();
+  void OnUploadSave();
   void DisplayMessage(const QString& msg, const std::string& color,
                       int duration = OSD::Duration::NORMAL);
   void ResetExternalIP();
@@ -142,6 +143,7 @@ private:
   QMenu* m_other_menu;
   QPushButton* m_game_button;
   QPushButton* m_start_button;
+  QPushButton* m_upload_button;
   QLabel* m_buffer_label;
   QSpinBox* m_buffer_size_box;
 

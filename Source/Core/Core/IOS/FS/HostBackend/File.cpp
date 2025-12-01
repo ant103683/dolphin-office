@@ -89,6 +89,13 @@ Result<FileHandle> HostFileSystem::OpenFile(Uid, Gid, const std::string& path, M
 
   if (!File::IsFile(host_path))
   {
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    File::IOFile lf(log_path, "ab");
+    if (lf)
+    {
+      std::string line = "[NPDEBUG] OpenFile: not found '" + host_path + "' for '" + path + "'\n";
+      lf.WriteBytes(line.data(), line.size());
+    }
     *handle = Handle{};
     return ResultCode::NotFound;
   }

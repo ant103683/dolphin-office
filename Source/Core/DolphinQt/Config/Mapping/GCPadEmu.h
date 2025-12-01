@@ -36,11 +36,15 @@ private:
   struct PadPreset
   {
     QString title;
+    QString id;
     QJsonObject mappings;
   };
 
   QComboBox* m_preset_combo;
   QPushButton* m_custom_mapping_button;
+  QPushButton* m_delete_preset_button;
   std::map<std::string, QGroupBox*> m_group_boxes;
   std::vector<PadPreset> m_presets;
+  void OnDeletePresetButtonPressed();
+  void UpdateDeleteButtonState();
 };

@@ -6,6 +6,7 @@
 #include "Common/CommonPaths.h"
 #include "Common/FileUtil.h"
 #include "Common/IOFile.h"
+#include "Common/Crypto/SHA1.h"
 #include "Core/State.h"
 #include "Core/TitleDatabase.h"
 
@@ -180,6 +181,20 @@ bool NetplayManager::LoadInitialState(Core::System& system, const std::string& g
   // 调用核心的 State::LoadAs 执行真正的读档
   ::State::LoadAs(system, sav_path);
   return true;
+}
+
+void NetplayManager::SetCurrentGame(const SyncIdentifier& si, const std::string& netplay_name)
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  CurrentGame cg;
+  cg.game_id = si.game_id;
+  cg.revision = si.revision;
+  cg.disc_number = si.disc_number;
+  cg.is_datel = si.is_datel;
+  cg.sync_hash = si.sync_hash;
+  cg.hash8 = Common::SHA1::DigestToString(si.sync_hash).substr(0, 8);
+  cg.name = netplay_name;
+  m_current_game = std::move(cg);
 }
 
 }  // namespace NetPlay

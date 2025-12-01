@@ -9,6 +9,7 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QFrame>
+#include <QUuid>
 
 #include "Common/FileUtil.h"
 
@@ -137,8 +138,10 @@ void GCPadCustomPresetDialog::CreateLayout()
 
 void GCPadCustomPresetDialog::Save()
 {
-  std::string path = File::GetSysDirectory() + "/Profiles/GCPadPresets.json";
-  QFile file(QString::fromStdString(path));
+  const std::string user_dir = File::GetUserPath(D_USER_IDX) + std::string("Profiles/");
+  const std::string user_path = user_dir + std::string("GCPadPresets.json");
+  File::CreateDir(user_dir);
+  QFile file(QString::fromStdString(user_path));
 
   QJsonDocument doc;
   if (file.open(QIODevice::ReadOnly))
@@ -165,6 +168,7 @@ void GCPadCustomPresetDialog::Save()
   QJsonObject new_preset;
   // 使用默认值兜底
   new_preset[QStringLiteral("title")] = m_title_edit->text().isEmpty() ? QStringLiteral("Custom Preset") : m_title_edit->text();
+  new_preset[QStringLiteral("id")] = QUuid::createUuid().toString(QUuid::WithoutBraces);
 
   QJsonObject mappings;
   

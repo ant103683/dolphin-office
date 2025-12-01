@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "Core/NetPlayServer.h"
+#include "UICommon/GameListExporter.h"
 
 #include <algorithm>
 #include <chrono>
@@ -48,6 +49,11 @@
 #include "Core/GeckoCodeConfig.h"
 #include "Core/HW/EXI/EXI.h"
 #include "Core/HW/EXI/EXI_Device.h"
+#include "Core/Core.h"
+#include "Core/System.h"
+#include "Core/IOS/FS/FileSystem.h"
+#include "Core/IOS/FS/HostBackend/FS.h"
+#include "Core/NetPlayUpload.h"
 #include "NetplayManager.h"
 #ifdef HAS_LIBMGBA
 #include "Core/HW/GBACore.h"
@@ -791,6 +797,98 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
   }
   break;
 
+  case MessageID::RequestChangeGame:
+  {
+    // Minimal payload: game_id + sync_hash (20 bytes)
+    std::string req_game_id;
+    packet >> req_game_id;
+    std::array<u8, 20> req_hash{};
+    for (u8& b : req_hash)
+      packet >> b;
+
+    bool exists = false;
+    std::string netplay_name;
+
+    const picojson::value json_data = UICommon::ImportGamesListJson();
+    SyncIdentifier si{};
+    if (json_data.is<picojson::object>())
+    {
+      const auto& root_obj = json_data.get<picojson::object>();
+      auto games_it = root_obj.find("games");
+      if (games_it != root_obj.end() && games_it->second.is<picojson::array>())
+      {
+        const auto& games_array = games_it->second.get<picojson::array>();
+        const std::string req_hash_hex = Common::SHA1::DigestToString(req_hash);
+        for (const auto& v : games_array)
+        {
+          if (!v.is<picojson::object>())
+            continue;
+          const auto& g = v.get<picojson::object>();
+          const auto id_it = g.find("game_id");
+          const auto hash_it = g.find("sync_hash");
+          if (id_it != g.end() && id_it->second.is<std::string>() &&
+              hash_it != g.end() && hash_it->second.is<std::string>())
+          {
+            std::string json_id = id_it->second.get<std::string>();
+            std::string json_hash = hash_it->second.get<std::string>();
+            std::string json_hash_upper = json_hash;
+            Common::ToUpper(&json_hash_upper);
+            std::string req_hash_upper = req_hash_hex;
+            Common::ToUpper(&req_hash_upper);
+            if (json_id == req_game_id && json_hash_upper == req_hash_upper)
+            {
+              exists = true;
+              const auto name_it = g.find("netplay_name");
+              netplay_name = (name_it != g.end() && name_it->second.is<std::string>()) ?
+                                 name_it->second.get<std::string>() :
+                                 json_id;
+
+              si.game_id = req_game_id;
+              si.sync_hash = req_hash;
+
+              const auto dol_elf_size_it = g.find("dol_elf_size");
+              si.dol_elf_size =
+                  (dol_elf_size_it != g.end() && dol_elf_size_it->second.is<double>()) ?
+                      static_cast<u32>(dol_elf_size_it->second.get<double>()) :
+                      0;
+
+              const auto revision_it = g.find("revision");
+              si.revision = (revision_it != g.end() && revision_it->second.is<double>()) ?
+                                static_cast<u16>(revision_it->second.get<double>()) :
+                                0;
+
+              const auto disc_number_it = g.find("disc_number");
+              si.disc_number =
+                  (disc_number_it != g.end() && disc_number_it->second.is<double>()) ?
+                      static_cast<u8>(disc_number_it->second.get<double>()) :
+                      0;
+
+              const auto is_datel_it = g.find("is_datel");
+              si.is_datel = (is_datel_it != g.end() && is_datel_it->second.is<bool>()) ?
+                                is_datel_it->second.get<bool>() :
+                                false;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (exists)
+    {
+      ChangeGame(si, netplay_name);
+    }
+    else
+    {
+      sf::Packet resp;
+      resp << MessageID::ChangeGameNotFound;
+      resp << req_game_id;
+      Send(player.socket, resp);
+    }
+
+  }
+  break;
+
   case MessageID::ChunkedDataProgress:
   {
     u32 cid;
@@ -1354,6 +1452,104 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
 
     switch (sub_id)
     {
+    case SyncSaveDataID::UploadIntent:
+    {
+      const bool allowed = m_settings.savedata_write;
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+        File::IOFile lf(log_path, "ab");
+        if (lf)
+        {
+          const std::string line = fmt::format("[SERVER] UploadIntent allowed={} pid={}\n", allowed, player.pid);
+          lf.WriteBytes(line.data(), line.size());
+        }
+      }
+      if (m_dialog)
+        m_dialog->AppendChat(allowed ? "允许上传存档，开始等待数据..."
+                                     : "拒绝上传存档：未启用写回主机存档");
+      sf::Packet resp;
+      resp << MessageID::SyncSaveData;
+      resp << (allowed ? SyncSaveDataID::AllowUpload : SyncSaveDataID::Failure);
+      Send(player.socket, resp);
+    }
+    break;
+
+    case SyncSaveDataID::WiiData:
+    {
+      std::vector<u64> titles;
+      const std::string redirect_target = File::GetUserPath(D_USER_IDX) + "RedirectSession" DIR_SEP;
+      const std::string temp_root = File::GetUserPath(D_USER_IDX) + "WiiUploadSession" DIR_SEP;
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+        File::IOFile lf(log_path, "ab");
+        if (lf)
+        {
+          const std::string line = fmt::format("[SERVER] WiiData recv temp_root='{}' redirect='{}'\n", temp_root, redirect_target);
+          lf.WriteBytes(line.data(), line.size());
+        }
+      }
+      if (m_dialog)
+        m_dialog->AppendChat(Common::FmtFormatT("收到上传数据，开始解包到：{0}，重定向：{1}", temp_root,
+                                               redirect_target));
+      auto temp_fs = std::make_unique<IOS::HLE::FS::HostFileSystem>(temp_root);
+
+      const bool decode_ok = NetPlayUpload::ServerDecodeWiiSaveUploadPacketToFS(
+          packet, temp_fs.get(), redirect_target, &titles);
+
+      if (!decode_ok)
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+        File::IOFile lf(log_path, "ab");
+        if (lf)
+        {
+          const std::string line = "[SERVER] WiiData decode failed\n";
+          lf.WriteBytes(line.data(), line.size());
+        }
+        if (m_dialog)
+          m_dialog->AppendChat("上传解包失败");
+        sf::Packet resp;
+        resp << MessageID::SyncSaveData;
+        resp << SyncSaveDataID::Failure;
+        Send(player.socket, resp);
+        break;
+      }
+
+      ENetPeer* sock = player.socket;
+      if (m_dialog)
+        m_dialog->AppendChat("解包成功，开始覆盖主机存档...");
+      std::thread([this, sock, titles = std::move(titles), temp_fs = std::move(temp_fs)]() mutable {
+        {
+          const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+          File::IOFile lf(log_path, "ab");
+          if (lf)
+          {
+            const std::string line = fmt::format("[SERVER] Apply start titles={}\n", fmt::join(titles, ","));
+            lf.WriteBytes(line.data(), line.size());
+          }
+        }
+        auto configured_fs = IOS::HLE::FS::MakeFileSystem(IOS::HLE::FS::Location::Configured);
+        const bool apply_ok = NetPlayUpload::ServerApplyUploadedWiiSaves(
+            temp_fs.get(), configured_fs.get(), titles, true);
+
+        if (m_dialog)
+          m_dialog->AppendChat(apply_ok ? "上传存档应用成功" : "上传存档应用失败");
+        {
+          const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+          File::IOFile lf(log_path, "ab");
+          if (lf)
+          {
+            const std::string line = fmt::format("[SERVER] Apply done ok={}\n", apply_ok);
+            lf.WriteBytes(line.data(), line.size());
+          }
+        }
+        sf::Packet resp;
+        resp << MessageID::SyncSaveData;
+        resp << (apply_ok ? SyncSaveDataID::Success : SyncSaveDataID::Failure);
+        Send(sock, resp);
+      }).detach();
+    }
+    break;
+
     case SyncSaveDataID::Success:
     {
       if (m_start_pending)
@@ -1520,9 +1716,309 @@ bool NetPlayServer::ChangeGame(const SyncIdentifier& sync_identifier,
   const std::string hash8 = hash_str.substr(0, 8);
   SConfig::GetInstance().SetSaveHash8(hash8);
 
+  NetplayManager::GetInstance().SetCurrentGame(m_selected_game_identifier, m_selected_game_name);
+
   // Debug logging similar to previous instrumentation
   const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
   File::WriteStringToFile(log_path, "[NPDEBUG] ChangeGame set SaveHash8=" + hash8 + "\n");
+
+  {
+    const std::string gid = m_selected_game_identifier.game_id;
+    if (gid.size() == 6)
+    {
+      const u32 type_high = 0x00010000u;
+      const u32 id_low = (static_cast<u8>(gid[0]) << 24) | (static_cast<u8>(gid[1]) << 16) |
+                         (static_cast<u8>(gid[2]) << 8) | static_cast<u8>(gid[3]);
+      const u64 title_id = (static_cast<u64>(type_high) << 32) | static_cast<u64>(id_low);
+
+      {
+        const std::string tmd_dir_dbg = Common::GetTitleContentPath(title_id);
+        const std::string tmd_path_dbg = Common::GetTMDFileName(title_id);
+        const std::string log_path2 = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+        File::IOFile lf(log_path2, "ab");
+        if (lf)
+        {
+          const std::string line = fmt::format("[NPDEBUG] ChangeGame: title_id={:016x}, tmd_dir='{}', tmd_path='{}'\n",
+                                              title_id, tmd_dir_dbg, tmd_path_dbg);
+          lf.WriteBytes(line.data(), line.size());
+        }
+      }
+
+      IOS::HLE::Kernel ios;
+      if (!ios.GetESCore().FindInstalledTMD(title_id).IsValid())
+      {
+        {
+          const std::string log_path2 = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+          File::IOFile lf(log_path2, "ab");
+          if (lf)
+          {
+            const std::string line = fmt::format("[NPDEBUG] ChangeGame: installed_tmd_exists=false for {:016x}\n",
+                                                title_id);
+            lf.WriteBytes(line.data(), line.size());
+          }
+        }
+        std::vector<u8> tmd_bytes;
+        {
+          const picojson::value json_data = UICommon::ImportGamesListJson();
+          if (json_data.is<picojson::object>())
+          {
+            const auto& root_obj = json_data.get<picojson::object>();
+            auto games_it = root_obj.find("games");
+            if (games_it != root_obj.end() && games_it->second.is<picojson::array>())
+            {
+              const auto& games_array = games_it->second.get<picojson::array>();
+              const std::string req_hash_hex = Common::SHA1::DigestToString(m_selected_game_identifier.sync_hash);
+              std::string req_hash_upper = req_hash_hex;
+              Common::ToUpper(&req_hash_upper);
+              for (const auto& v : games_array)
+              {
+                if (!v.is<picojson::object>())
+                  continue;
+                const auto& g = v.get<picojson::object>();
+                const auto id_it = g.find("game_id");
+                const auto hash_it = g.find("sync_hash");
+                const auto tmd_it = g.find("tmd");
+                if (id_it != g.end() && id_it->second.is<std::string>() &&
+                    hash_it != g.end() && hash_it->second.is<std::string>() &&
+                    tmd_it != g.end() && tmd_it->second.is<std::string>())
+                {
+                  std::string json_id = id_it->second.get<std::string>();
+                  std::string json_hash = hash_it->second.get<std::string>();
+                  std::string json_hash_upper = json_hash;
+                  Common::ToUpper(&json_hash_upper);
+                  if (json_id == gid && json_hash_upper == req_hash_upper)
+                  {
+                    const std::string tmd_hex = tmd_it->second.get<std::string>();
+                    auto hex_to_bytes = [](const std::string& s) {
+                      std::vector<u8> out;
+                      int hi = -1;
+                      for (char c : s)
+                      {
+                        if (c == ' ' || c == '\n' || c == '\r' || c == '\t')
+                          continue;
+                        u8 v = 0;
+                        if (c >= '0' && c <= '9')
+                          v = static_cast<u8>(c - '0');
+                        else if (c >= 'a' && c <= 'f')
+                          v = static_cast<u8>(c - 'a' + 10);
+                        else if (c >= 'A' && c <= 'F')
+                          v = static_cast<u8>(c - 'A' + 10);
+                        else
+                          continue;
+                        if (hi < 0)
+                          hi = v;
+                        else
+                        {
+                          out.push_back(static_cast<u8>((hi << 4) | v));
+                          hi = -1;
+                        }
+                      }
+                      return out;
+                    };
+                    tmd_bytes = hex_to_bytes(tmd_hex);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        std::vector<u8> ticket_bytes;
+        std::vector<u8> cert_bytes;
+        {
+          const picojson::value json_data2 = UICommon::ImportGamesListJson();
+          if (json_data2.is<picojson::object>())
+          {
+            const auto& root_obj2 = json_data2.get<picojson::object>();
+            auto games_it2 = root_obj2.find("games");
+            if (games_it2 != root_obj2.end() && games_it2->second.is<picojson::array>())
+            {
+              const auto& games_array2 = games_it2->second.get<picojson::array>();
+              const std::string req_hash_hex2 = Common::SHA1::DigestToString(m_selected_game_identifier.sync_hash);
+              std::string req_hash_upper2 = req_hash_hex2;
+              Common::ToUpper(&req_hash_upper2);
+              for (const auto& v2 : games_array2)
+              {
+                if (!v2.is<picojson::object>())
+                  continue;
+                const auto& g2 = v2.get<picojson::object>();
+                const auto id_it2 = g2.find("game_id");
+                const auto hash_it2 = g2.find("sync_hash");
+                const auto ticket_it2 = g2.find("ticket");
+                const auto cert_it2 = g2.find("cert");
+                if (id_it2 != g2.end() && id_it2->second.is<std::string>() &&
+                    hash_it2 != g2.end() && hash_it2->second.is<std::string>())
+                {
+                  std::string json_id2 = id_it2->second.get<std::string>();
+                  std::string json_hash2 = hash_it2->second.get<std::string>();
+                  std::string json_hash_upper2 = json_hash2;
+                  Common::ToUpper(&json_hash_upper2);
+                  if (json_id2 == gid && json_hash_upper2 == req_hash_upper2)
+                  {
+                    auto hex_to_bytes2 = [](const std::string& s) {
+                      std::vector<u8> out;
+                      int hi = -1;
+                      for (char c : s)
+                      {
+                        if (c == ' ' || c == '\n' || c == '\r' || c == '\t')
+                          continue;
+                        u8 v = 0;
+                        if (c >= '0' && c <= '9')
+                          v = static_cast<u8>(c - '0');
+                        else if (c >= 'a' && c <= 'f')
+                          v = static_cast<u8>(c - 'a' + 10);
+                        else if (c >= 'A' && c <= 'F')
+                          v = static_cast<u8>(c - 'A' + 10);
+                        else
+                          continue;
+                        if (hi < 0)
+                          hi = v;
+                        else
+                        {
+                          out.push_back(static_cast<u8>((hi << 4) | v));
+                          hi = -1;
+                        }
+                      }
+                      return out;
+                    };
+                    if (ticket_it2 != g2.end() && ticket_it2->second.is<std::string>())
+                      ticket_bytes = hex_to_bytes2(ticket_it2->second.get<std::string>());
+                    if (cert_it2 != g2.end() && cert_it2->second.is<std::string>())
+                      cert_bytes = hex_to_bytes2(cert_it2->second.get<std::string>());
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        bool strict_done = false;
+        if (!tmd_bytes.empty() && !cert_bytes.empty() && !ticket_bytes.empty())
+        {
+          IOS::HLE::ESCore& es = ios.GetESCore();
+          const auto ticket_rc = es.ImportTicket(ticket_bytes, cert_bytes,
+                                                IOS::HLE::ESCore::TicketImportType::PossiblyPersonalised,
+                                                IOS::HLE::ESCore::VerifySignature::Yes);
+          if (ticket_rc == IOS::HLE::IPC_SUCCESS)
+          {
+            IOS::HLE::ESCore::Context ctx;
+            ctx.uid = IOS::SYSMENU_UID;
+            ctx.gid = IOS::SYSMENU_GID;
+            const auto init_rc = es.ImportTitleInit(ctx, tmd_bytes, cert_bytes,
+                                                    IOS::HLE::ESCore::VerifySignature::Yes);
+            if (init_rc == IOS::HLE::IPC_SUCCESS)
+            {
+              const auto done_rc = es.ImportTitleDone(ctx);
+              strict_done = (done_rc == IOS::HLE::IPC_SUCCESS);
+            }
+          }
+          {
+            const std::string log_path2 = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+            File::IOFile lf(log_path2, "ab");
+            if (lf)
+            {
+              const std::string line = fmt::format(
+                  "[NPDEBUG] ChangeGame: strict_import ticket_rc={} done={}\n",
+                  static_cast<int>(ticket_rc), strict_done ? 1 : 0);
+              lf.WriteBytes(line.data(), line.size());
+            }
+          }
+        }
+
+        if (tmd_bytes.empty())
+        {
+          tmd_bytes.resize(sizeof(IOS::ES::TMDHeader));
+          auto put_u32 = [&tmd_bytes](size_t off, u32 v) {
+            tmd_bytes[off + 0] = static_cast<u8>((v >> 24) & 0xff);
+            tmd_bytes[off + 1] = static_cast<u8>((v >> 16) & 0xff);
+            tmd_bytes[off + 2] = static_cast<u8>((v >> 8) & 0xff);
+            tmd_bytes[off + 3] = static_cast<u8>(v & 0xff);
+          };
+          auto put_u64 = [&put_u32](size_t off, u64 v) {
+            put_u32(off + 0, static_cast<u32>((v >> 32) & 0xffffffffu));
+            put_u32(off + 4, static_cast<u32>(v & 0xffffffffu));
+          };
+          auto put_u16 = [&tmd_bytes](size_t off, u16 v) {
+            tmd_bytes[off + 0] = static_cast<u8>((v >> 8) & 0xff);
+            tmd_bytes[off + 1] = static_cast<u8>(v & 0xff);
+          };
+
+          put_u32(0, static_cast<u32>(IOS::SignatureType::RSA2048));
+          tmd_bytes[offsetof(IOS::ES::TMDHeader, tmd_version)] = 1;
+          tmd_bytes[offsetof(IOS::ES::TMDHeader, ca_crl_version)] = 0;
+          tmd_bytes[offsetof(IOS::ES::TMDHeader, signer_crl_version)] = 0;
+          tmd_bytes[offsetof(IOS::ES::TMDHeader, is_vwii)] = 0;
+          put_u64(offsetof(IOS::ES::TMDHeader, ios_id), 0x000000010000003aULL);
+          put_u64(offsetof(IOS::ES::TMDHeader, title_id), title_id);
+          put_u32(offsetof(IOS::ES::TMDHeader, title_flags), IOS::ES::TITLE_TYPE_DEFAULT);
+          tmd_bytes[offsetof(IOS::ES::TMDHeader, group_id) + 0] = static_cast<u8>(gid[4]);
+          tmd_bytes[offsetof(IOS::ES::TMDHeader, group_id) + 1] = static_cast<u8>(gid[5]);
+          put_u16(offsetof(IOS::ES::TMDHeader, region), 0);
+          put_u32(offsetof(IOS::ES::TMDHeader, access_rights), 0);
+          put_u16(offsetof(IOS::ES::TMDHeader, title_version), 1);
+          put_u16(offsetof(IOS::ES::TMDHeader, num_contents), 0);
+          put_u16(offsetof(IOS::ES::TMDHeader, boot_index), 0);
+        }
+
+        constexpr IOS::HLE::FS::Modes modes{IOS::HLE::FS::Mode::ReadWrite, IOS::HLE::FS::Mode::ReadWrite,
+                                            IOS::HLE::FS::Mode::None};
+        const std::string tmp_path = "/tmp/title.tmd";
+        bool wrote_tmp = false;
+        {
+          auto tmp_file = ios.GetFS()->CreateAndOpenFile(IOS::PID_KERNEL, IOS::PID_KERNEL, tmp_path, modes);
+          if (!strict_done && tmp_file)
+          {
+            auto wr = tmp_file->Write(tmd_bytes.data(), tmd_bytes.size());
+            if (wr && *wr == tmd_bytes.size())
+              wrote_tmp = true;
+          }
+        }
+        if (wrote_tmp)
+        {
+          const std::string tmd_dir = Common::GetTitleContentPath(title_id);
+          const std::string tmd_path = Common::GetTMDFileName(title_id);
+          ios.GetFS()->CreateFullPath(IOS::PID_KERNEL, IOS::PID_KERNEL, tmd_path, 0,
+                                      {IOS::HLE::FS::Mode::ReadWrite, IOS::HLE::FS::Mode::ReadWrite,
+                                       IOS::HLE::FS::Mode::Read});
+          ios.GetFS()->SetMetadata(IOS::PID_KERNEL, tmd_dir, IOS::PID_KERNEL, IOS::PID_KERNEL, 0,
+                                   modes);
+          {
+            const std::string log_path2 = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+            File::IOFile lf(log_path2, "ab");
+            if (lf)
+            {
+              const std::string line = fmt::format("[NPDEBUG] ChangeGame: renaming '{}' -> '{}'\n", tmp_path, tmd_path);
+              lf.WriteBytes(line.data(), line.size());
+            }
+          }
+          const auto rename_rc = ios.GetFS()->Rename(IOS::PID_KERNEL, IOS::PID_KERNEL, tmp_path, tmd_path);
+          {
+            const std::string log_path2 = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+            File::IOFile lf(log_path2, "ab");
+            if (lf)
+            {
+              const std::string line = fmt::format("[NPDEBUG] ChangeGame: rename result={} to '{}'\n",
+                                                   static_cast<int>(rename_rc), tmd_path);
+              lf.WriteBytes(line.data(), line.size());
+            }
+          }
+        }
+      }
+      else
+      {
+        const std::string log_path2 = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+        File::IOFile lf(log_path2, "ab");
+        if (lf)
+        {
+          const std::string line = fmt::format("[NPDEBUG] ChangeGame: installed_tmd_exists=true for {:016x}\n",
+                                              title_id);
+          lf.WriteBytes(line.data(), line.size());
+        }
+      }
+    }
+  }
 
   // send changed game to clients
   sf::Packet spac;
@@ -1560,6 +2056,18 @@ bool NetPlayServer::AbortGameDigest()
 // called from ---GUI--- thread
 bool NetPlayServer::SetupNetSettings()
 {
+  INFO_LOG_FMT(NETPLAY, "Loading game settings for {:02x}.",
+               fmt::join(m_selected_game_identifier.sync_hash, ""));
+
+  NetPlay::NetSettings settings;
+
+#if IS_SERVER
+  // Server mode: use selected identifier directly, do not depend on GameFile
+  Config::AddLayer(ConfigLoaders::GenerateGlobalGameConfigLoader(
+      m_selected_game_identifier.game_id, m_selected_game_identifier.revision));
+  Config::AddLayer(ConfigLoaders::GenerateLocalGameConfigLoader(
+      m_selected_game_identifier.game_id, m_selected_game_identifier.revision));
+#else
   const auto game = m_dialog->FindGameFile(m_selected_game_identifier);
   if (game == nullptr)
   {
@@ -1569,16 +2077,12 @@ bool NetPlayServer::SetupNetSettings()
     return false;
   }
 
-  INFO_LOG_FMT(NETPLAY, "Loading game settings for {:02x}.",
-               fmt::join(m_selected_game_identifier.sync_hash, ""));
-
-  NetPlay::NetSettings settings;
-
   // Load GameINI so we can sync the settings from it
   Config::AddLayer(
       ConfigLoaders::GenerateGlobalGameConfigLoader(game->GetGameID(), game->GetRevision()));
   Config::AddLayer(
       ConfigLoaders::GenerateLocalGameConfigLoader(game->GetGameID(), game->GetRevision()));
+#endif
 
   // Copy all relevant settings
   settings.cpu_thread = Config::Get(Config::MAIN_CPU_THREAD);
@@ -1799,8 +2303,16 @@ bool NetPlayServer::StartGame()
 
   const u64 initial_rtc = GetInitialNetPlayRTC();
 
+#if IS_SERVER
+  // Server mode: derive region directory without relying on GameFile.
+  // Prefer configured fallback; region-specific handling is not required for hosting.
+  const DiscIO::Region used_region = Config::Get(Config::MAIN_FALLBACK_REGION);
+  const std::string region =
+      Config::GetDirectoryForRegion(Config::ToGameCubeRegion(used_region));
+#else
   const std::string region = Config::GetDirectoryForRegion(
       Config::ToGameCubeRegion(m_dialog->FindGameFile(m_selected_game_identifier)->GetRegion()));
+#endif
 
   // load host's GC SRAM
   SConfig::GetInstance().m_strSRAM = File::GetUserPath(F_GCSRAM_IDX);
@@ -1940,14 +2452,17 @@ std::optional<SaveSyncInfo> NetPlayServer::CollectSaveSyncInfo()
     }
   }
 
+#if !IS_SERVER
   sync_info.game = m_dialog->FindGameFile(m_selected_game_identifier);
   if (sync_info.game == nullptr)
   {
     PanicAlertFmtT("Selected game doesn't exist in game list!");
     return std::nullopt;
   }
+#endif
 
   sync_info.has_wii_save = false;
+#if !IS_SERVER
   if (m_settings.savedata_load && (sync_info.game->GetPlatform() == DiscIO::Platform::WiiDisc ||
                                    sync_info.game->GetPlatform() == DiscIO::Platform::WiiWAD ||
                                    sync_info.game->GetPlatform() == DiscIO::Platform::ELFOrDOL))
@@ -2005,6 +2520,70 @@ std::optional<SaveSyncInfo> NetPlayServer::CollectSaveSyncInfo()
       }
     }
   }
+#else
+  if (m_settings.savedata_load)
+  {
+    INFO_LOG_FMT(NETPLAY, "Adding Wii saves (server mode).");
+
+    sync_info.has_wii_save = true;
+    ++sync_info.save_count;
+
+    sync_info.configured_fs = IOS::HLE::FS::MakeFileSystem(IOS::HLE::FS::Location::Configured);
+    {
+      IOS::HLE::Kernel ios;
+      if (m_settings.savedata_sync_all_wii)
+      {
+        for (const u64 title : ios.GetESCore().GetInstalledTitles())
+        {
+          auto save = WiiSave::MakeNandStorage(sync_info.configured_fs.get(), title);
+          if (save && save->ReadHeader().has_value() && save->ReadBkHeader().has_value() &&
+              save->ReadFiles().has_value())
+          {
+            sync_info.wii_saves.emplace_back(title, std::move(save));
+          }
+          else
+          {
+            INFO_LOG_FMT(NETPLAY, "Skipping Wii save of title {:016x}.", title);
+          }
+        }
+      }
+      else
+      {
+        for (const u64 title : ios.GetESCore().GetInstalledTitles())
+        {
+          const auto tmd = ios.GetESCore().FindInstalledTMD(title);
+          if (!tmd.IsValid())
+            continue;
+          if (tmd.GetGameID() != m_selected_game_identifier.game_id)
+            continue;
+
+          auto save = WiiSave::MakeNandStorage(sync_info.configured_fs.get(), title);
+          if (save && save->ReadHeader().has_value() && save->ReadBkHeader().has_value() &&
+              save->ReadFiles().has_value())
+          {
+            sync_info.wii_saves.emplace_back(title, std::move(save));
+          }
+          else
+          {
+            INFO_LOG_FMT(NETPLAY, "Skipping Wii save of title {:016x}.", title);
+          }
+        }
+      }
+    }
+
+    {
+      auto file = sync_info.configured_fs->OpenFile(
+          IOS::PID_KERNEL, IOS::PID_KERNEL, Common::GetMiiDatabasePath(), IOS::HLE::FS::Mode::Read);
+      if (file)
+      {
+        std::vector<u8> file_data(file->GetStatus()->size);
+        if (!file->Read(file_data.data(), file_data.size()))
+          return std::nullopt;
+        sync_info.mii_data = std::move(file_data);
+      }
+    }
+  }
+#endif
 
   for (size_t i = 0; i < m_gba_config.size(); ++i)
   {
@@ -2042,9 +2621,16 @@ bool NetPlayServer::SyncSaveData(const SaveSyncInfo& sync_info)
   if (sync_info.save_count == 0)
     return true;
 
+#if IS_SERVER
+  // Server mode: compute region without GameFile
+  const DiscIO::Region game_region = Config::Get(Config::MAIN_FALLBACK_REGION);
+  const auto gamecube_region = Config::ToGameCubeRegion(game_region);
+  const std::string region = Config::GetDirectoryForRegion(gamecube_region);
+#else
   const auto game_region = sync_info.game->GetRegion();
   const auto gamecube_region = Config::ToGameCubeRegion(game_region);
   const std::string region = Config::GetDirectoryForRegion(gamecube_region);
+#endif
 
   for (ExpansionInterface::Slot slot : ExpansionInterface::MEMCARD_SLOTS)
   {
@@ -2095,7 +2681,11 @@ bool NetPlayServer::SyncSaveData(const SaveSyncInfo& sync_info)
       if (File::IsDirectory(path))
       {
         std::vector<std::string> files =
+#if IS_SERVER
+            GCMemcardDirectory::GetFileNamesForGameID(path + DIR_SEP, m_selected_game_identifier.game_id);
+#else
             GCMemcardDirectory::GetFileNamesForGameID(path + DIR_SEP, sync_info.game->GetGameID());
+#endif
 
         INFO_LOG_FMT(NETPLAY, "Sending data of GCI memcard {} in slot {} ({} files).", path,
                      is_slot_a ? 'A' : 'B', files.size());
@@ -2267,6 +2857,11 @@ bool NetPlayServer::SyncCodes()
   // Sync Codes is ticked, so set m_codes_synced to false
   m_codes_synced = false;
 
+  // Find all INI files
+#if IS_SERVER
+  const auto& game_id = m_selected_game_identifier.game_id;
+  const auto revision = m_selected_game_identifier.revision;
+#else
   // Get Game Path
   const auto game = m_dialog->FindGameFile(m_selected_game_identifier);
   if (game == nullptr)
@@ -2274,10 +2869,9 @@ bool NetPlayServer::SyncCodes()
     PanicAlertFmtT("Selected game doesn't exist in game list!");
     return false;
   }
-
-  // Find all INI files
   const auto game_id = game->GetGameID();
   const auto revision = game->GetRevision();
+#endif
   Common::IniFile globalIni;
   for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(game_id, revision))
     globalIni.Load(File::GetSysDirectory() + GAMESETTINGS_DIR DIR_SEP + filename, true);
