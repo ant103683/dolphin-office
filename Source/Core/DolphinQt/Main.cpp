@@ -16,6 +16,7 @@
 #include <OptionParser.h>
 #include <QAbstractEventDispatcher>
 #include <QApplication>
+#include <QString>
 #include <QObject>
 #include <QPushButton>
 #include <QWidget>
@@ -310,6 +311,28 @@ int main(int argc, char* argv[])
   }
   UICommon::Init();
   Resources::Init();
+  {
+    const std::string exe_dir = File::GetExeDirectory();
+    const std::string fixed_path = exe_dir + std::string(DIR_SEP) + "dbz3_iso";
+    if (File::IsDirectory(fixed_path))
+    {
+      const auto paths = Config::GetIsoPaths();
+      const auto normalized_new = WithUnifiedPathSeparators(fixed_path);
+      bool present = false;
+      for (const auto& p : paths)
+      {
+        if (WithUnifiedPathSeparators(p) == normalized_new)
+        {
+          present = true;
+          break;
+        }
+      }
+      if (!present)
+      {
+        Settings::Instance().AddPath(QString::fromStdString(fixed_path));
+      }
+    }
+  }
   Settings::Instance().SetBatchModeEnabled(options.is_set("batch"));
 
   // Hook up alerts from core
