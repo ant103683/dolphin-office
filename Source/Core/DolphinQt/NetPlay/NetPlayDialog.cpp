@@ -581,11 +581,13 @@ void NetPlayDialog::OnStart()
 
     // 检查游戏文件是否存在 (这个检查可能重复，因为 UpdateGUI 已经检查了)
     const auto game = FindGameFile(m_current_game_identifier);
+#if !IS_SERVER
     if (!game)
     {
       PanicAlertFmtT("Selected game doesn't exist in game list!");
       return;
     }
+#endif
     // 主机直接请求服务器开始游戏检查流程
     if (server->RequestStartGame())
       SetOptionsEnabled(false);  // 启动请求成功后禁用选项
