@@ -187,6 +187,8 @@ public:
 
   // Request server to change game by minimal identifier (game_id + sync_hash)
   void RequestChangeGameIdHash(const std::string& game_id, const std::array<u8, 20>& sync_hash);
+  // Request server to change game by full identifier (including wii keys etc) for auto-sync
+  void RequestChangeGameFull(const UICommon::GameFile& game);
 
   void RequestWiiSaveUpload();
 

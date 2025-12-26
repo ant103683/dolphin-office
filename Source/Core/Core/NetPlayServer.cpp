@@ -26,6 +26,7 @@
 #include "Common/ENet.h"
 #include "Common/FileUtil.h"
 #include "Common/IOFile.h"
+#include "Common/JsonUtil.h"
 #include "Common/HttpRequest.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
@@ -768,6 +769,20 @@ void NetPlayServer::SendChunkedToClients(sf::Packet&& packet, const PlayerId ski
   m_chunked_data_event.Set();
 }
 
+void NetPlayServer::SendPauseCommand()
+{
+  sf::Packet spac;
+  spac << MessageID::PauseSimulation;
+  SendToClients(spac);
+}
+
+void NetPlayServer::SendResumeCommand()
+{
+  sf::Packet spac;
+  spac << MessageID::ResumeSimulation;
+  SendToClients(spac);
+}
+
 // called from ---NETPLAY--- thread
 unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
 {
@@ -886,6 +901,171 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
       Send(player.socket, resp);
     }
 
+  }
+  break;
+
+  case MessageID::RequestChangeGameFull:
+  {
+    std::string game_id;
+    packet >> game_id;
+
+    std::array<u8, 20> sync_hash{};
+    for (u8& b : sync_hash)
+      packet >> b;
+
+    std::string netplay_name;
+    packet >> netplay_name;
+
+    u64 dol_elf_size = Common::PacketReadU64(packet);
+    u16 revision;
+    packet >> revision;
+    u8 disc_number;
+    packet >> disc_number;
+    bool is_datel;
+    packet >> is_datel;
+    u32 region_u32;
+    packet >> region_u32;
+    u32 platform_u32;
+    packet >> platform_u32;
+    bool has_wii_data;
+    packet >> has_wii_data;
+
+    std::vector<u8> tmd;
+    std::vector<u8> ticket;
+    std::vector<u8> cert;
+
+    if (has_wii_data)
+    {
+       u32 size;
+       packet >> size;
+       tmd.resize(size);
+       for(auto& b : tmd) packet >> b;
+
+       packet >> size;
+       ticket.resize(size);
+       for(auto& b : ticket) packet >> b;
+
+       packet >> size;
+       cert.resize(size);
+       for(auto& b : cert) packet >> b;
+    }
+
+    // JSON Update Logic
+    picojson::value json_data = UICommon::ImportGamesListJson();
+    picojson::object root_obj;
+    picojson::array games_array;
+
+    if (json_data.is<picojson::object>())
+    {
+      root_obj = json_data.get<picojson::object>();
+      auto games_it = root_obj.find("games");
+      if (games_it != root_obj.end() && games_it->second.is<picojson::array>())
+      {
+        games_array = games_it->second.get<picojson::array>();
+      }
+    }
+
+    const std::string req_hash_hex = Common::SHA1::DigestToString(sync_hash);
+    
+    // Check if game exists
+    bool exists = false;
+    for (auto& v : games_array)
+    {
+        if (!v.is<picojson::object>()) continue;
+        const auto& g = v.get<picojson::object>();
+        const auto id_it = g.find("game_id");
+        const auto hash_it = g.find("sync_hash");
+        if (id_it != g.end() && id_it->second.is<std::string>() &&
+            hash_it != g.end() && hash_it->second.is<std::string>())
+        {
+            std::string json_id = id_it->second.get<std::string>();
+            std::string json_hash = hash_it->second.get<std::string>();
+            std::string json_hash_upper = json_hash;
+            Common::ToUpper(&json_hash_upper);
+            std::string req_hash_upper = req_hash_hex;
+            Common::ToUpper(&req_hash_upper);
+
+            if (json_id == game_id && json_hash_upper == req_hash_upper)
+            {
+                exists = true;
+                break;
+            }
+        }
+    }
+
+    if (!exists)
+    {
+        picojson::object g;
+        g["netplay_name"] = picojson::value(netplay_name);
+        g["game_id"] = picojson::value(game_id);
+        g["revision"] = picojson::value(static_cast<double>(revision));
+        g["disc_number"] = picojson::value(static_cast<double>(disc_number));
+        g["sync_hash"] = picojson::value(req_hash_hex);
+        
+        std::string region_str = "Unknown";
+        switch(static_cast<DiscIO::Region>(region_u32)) {
+            case DiscIO::Region::NTSC_J: region_str = "NTSC-J"; break;
+            case DiscIO::Region::NTSC_U: region_str = "NTSC-U"; break;
+            case DiscIO::Region::PAL: region_str = "PAL"; break;
+            case DiscIO::Region::NTSC_K: region_str = "NTSC-K"; break;
+            default: break;
+        }
+        g["region"] = picojson::value(region_str);
+
+        picojson::object sync_obj;
+        sync_obj["dol_elf_size"] = picojson::value(static_cast<double>(dol_elf_size));
+        sync_obj["game_id"] = picojson::value(game_id);
+        sync_obj["revision"] = picojson::value(static_cast<double>(revision));
+        sync_obj["disc_number"] = picojson::value(static_cast<double>(disc_number));
+        sync_obj["is_datel"] = picojson::value(is_datel);
+        g["sync_identifier"] = picojson::value(sync_obj);
+
+        if (has_wii_data) {
+            if (!tmd.empty()) {
+                std::string tmd_hex = ArrayToString(tmd.data(), static_cast<u32>(tmd.size()), std::numeric_limits<int>::max(), false);
+                g["tmd"] = picojson::value(tmd_hex);
+                g["tmd_size"] = picojson::value(static_cast<double>(tmd.size()));
+            }
+            if (!ticket.empty()) {
+                std::string ticket_hex = ArrayToString(ticket.data(), static_cast<u32>(ticket.size()), std::numeric_limits<int>::max(), false);
+                g["ticket"] = picojson::value(ticket_hex);
+            }
+            if (!cert.empty()) {
+                 std::string cert_hex = ArrayToString(cert.data(), static_cast<u32>(cert.size()), std::numeric_limits<int>::max(), false);
+                 g["cert"] = picojson::value(cert_hex);
+            }
+        }
+        
+        games_array.push_back(picojson::value(g));
+        root_obj["games"] = picojson::value(games_array);
+        
+        // Timestamp
+        std::time_t now = std::time(nullptr);
+        std::tm* tm_now = std::gmtime(&now);
+        std::ostringstream oss;
+        oss << std::put_time(tm_now, "%Y-%m-%dT%H:%M:%SZ");
+        root_obj["generated_at"] = picojson::value(oss.str());
+
+        const std::string output_path = File::GetUserPath(D_CONFIG_IDX) + "games_list.json";
+        File::CreateFullPath(output_path);
+        JsonToFile(output_path, picojson::value(root_obj), true);
+        
+        INFO_LOG_FMT(NETPLAY, "Added new game to persistent list: {} (Hash: {})", game_id, req_hash_hex);
+    }
+    else
+    {
+        INFO_LOG_FMT(NETPLAY, "Game already exists in persistent list: {} (Hash: {})", game_id, req_hash_hex);
+    }
+
+    SyncIdentifier si;
+    si.game_id = game_id;
+    si.sync_hash = sync_hash;
+    si.dol_elf_size = dol_elf_size;
+    si.revision = revision;
+    si.disc_number = disc_number;
+    si.is_datel = is_datel;
+    
+    ChangeGame(si, netplay_name);
   }
   break;
 
@@ -3376,33 +3556,3 @@ void NetPlayServer::OnRequestStartGameClient(Client& player)
 }
 
 }  // namespace NetPlay
-
-void NetPlay::NetPlayServer::SendPauseCommand()
-{
-  sf::Packet packet;
-  packet << MessageID::PauseSimulation;
-  SendToClients(packet);
-
-  const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
-  File::IOFile log_file(log_path, "ab");
-  if (log_file)
-  {
-    const std::string& r = fmt::format("server sent pause command\n");
-    log_file.WriteBytes(r.c_str(), r.size());
-  }
-}
-
-void NetPlay::NetPlayServer::SendResumeCommand()
-{
-  sf::Packet packet;
-  packet << MessageID::ResumeSimulation;
-  SendToClients(packet);
-
-  const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
-  File::IOFile log_file(log_path, "ab");
-  if (log_file)
-  {
-    const std::string& r = fmt::format("server sent resume command\n");
-    log_file.WriteBytes(r.c_str(), r.size());
-  }
-}
