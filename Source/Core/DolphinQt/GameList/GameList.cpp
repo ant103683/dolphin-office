@@ -230,7 +230,7 @@ void GameList::MakeListView()
     SetResizeMode(Column::Banner, Mode::Fixed);
     SetResizeMode(Column::Title, Mode::Interactive);
     SetResizeMode(Column::Description, Mode::Interactive);
-    SetResizeMode(Column::Version, Mode::Fixed);
+    SetResizeMode(Column::Version, Mode::Interactive);
     SetResizeMode(Column::Maker, Mode::Interactive);
     SetResizeMode(Column::ID, Mode::Fixed);
     SetResizeMode(Column::Country, Mode::Fixed);
@@ -250,6 +250,7 @@ void GameList::MakeListView()
     m_list->setColumnWidth(static_cast<int>(Column::Country), 38);
     m_list->setColumnWidth(static_cast<int>(Column::Size), 85);
     m_list->setColumnWidth(static_cast<int>(Column::ID), 70);
+    m_list->setColumnWidth(static_cast<int>(Column::Version), 90);
   }
 
   // There's some odd platform-specific behavior with default minimum section size
