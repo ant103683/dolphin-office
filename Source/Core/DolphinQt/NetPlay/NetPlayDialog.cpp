@@ -449,25 +449,27 @@ void NetPlayDialog::ConnectWidgets()
     GameListDialog gld(m_game_list_model, this);
     if (gld.exec() == QDialog::Accepted)
     {
-#if IS_CLIENT
-      // Client: send minimal request (game_id + sync_hash) to server
-      if (auto client = Settings::Instance().GetNetPlayClient())
+      if (!IsHosting())
       {
-        // client->RequestChangeGameIdHash(sync_identifier.game_id, sync_identifier.sync_hash);
-        const UICommon::GameFile& game = gld.GetSelectedGame();
-        const NetPlay::SyncIdentifier sync_identifier = game.GetSyncIdentifier(); 
-        std::string game_id = sync_identifier.game_id;
-        std::array<u8, 20> sync_hash = sync_identifier.sync_hash;
-        client->RequestChangeGameIdHash(game_id, sync_hash);
+        // Client: send full request to server
+        if (auto client = Settings::Instance().GetNetPlayClient())
+        {
+          const UICommon::GameFile& game = gld.GetSelectedGame();
+          client->RequestChangeGameFull(game);
+        }
       }
-#else
-      const NetPlay::SyncIdentifier sync_identifier = gld.GetSelectedGameSyncIdentifier();
-      const std::string netplay_name = gld.GetSelectedGameNetPlayName();
-      Settings& settings = Settings::Instance();
-      settings.GetNetPlayServer()->ChangeGame(sync_identifier, netplay_name);
-      Settings::GetQSettings().setValue(QStringLiteral("netplay/hostgame"),
-                                        QString::fromStdString(netplay_name));
-#endif
+      else
+      {
+        const NetPlay::SyncIdentifier sync_identifier = gld.GetSelectedGameSyncIdentifier();
+        const std::string netplay_name = gld.GetSelectedGameNetPlayName();
+        Settings& settings = Settings::Instance();
+        if (auto server = settings.GetNetPlayServer())
+        {
+          server->ChangeGame(sync_identifier, netplay_name);
+        }
+        Settings::GetQSettings().setValue(QStringLiteral("netplay/hostgame"),
+                                          QString::fromStdString(netplay_name));
+      }
     }
   });
 
@@ -577,9 +579,9 @@ void NetPlayDialog::OnStart()
       return;
     }
 
-#if !IS_SERVER
     // 检查游戏文件是否存在 (这个检查可能重复，因为 UpdateGUI 已经检查了)
     const auto game = FindGameFile(m_current_game_identifier);
+#if !IS_SERVER
     if (!game)
     {
       PanicAlertFmtT("Selected game doesn't exist in game list!");

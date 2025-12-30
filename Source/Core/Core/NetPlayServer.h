@@ -56,6 +56,8 @@ public:
   bool StartGame();
   bool RequestStartGame();
   void AbortGameStart();
+  void SendPauseCommand();
+  void SendResumeCommand();
 
   PadMappingArray GetPadMapping() const;
   void SetPadMapping(const PadMappingArray& mappings);
@@ -220,9 +222,6 @@ private:
 
   // ... existing handlers ...
   void OnComputeGameDigest(sf::Packet& packet, Client& player);
-
-  void SendPauseCommand();
-  void SendResumeCommand();
 
 public:
   bool IsRunning() const { return m_is_running; }

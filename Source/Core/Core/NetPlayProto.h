@@ -180,6 +180,7 @@ enum class MessageID : u8
 
   // Client requests to change game by minimal identifier
   RequestChangeGame = 0xAE,
+  RequestChangeGameFull = 0xAC,
   // Server notifies client that requested game does not exist on server list
   ChangeGameNotFound = 0xAF,
 

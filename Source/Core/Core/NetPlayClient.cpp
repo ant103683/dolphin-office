@@ -77,6 +77,8 @@
 #include "Core/SyncIdentifier.h"
 #include "Core/System.h"
 #include "DiscIO/Blob.h"
+#include "DiscIO/Enums.h"
+#include "DiscIO/Volume.h"
 
 #include "InputCommon/ControllerEmu/ControlGroup/Attachments.h"
 #include "InputCommon/GCAdapter.h"
@@ -84,6 +86,8 @@
 #include "UICommon/GameFile.h"
 #include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/VideoConfig.h"
+
+#include "Core/TitleDatabase.h"
 
 namespace NetPlay
 {
@@ -2936,6 +2940,72 @@ void NetPlayClient::RequestBufferChange(int new_buffer_value)
   packet << static_cast<s32>(new_buffer_value);
   Send(packet); // Assuming Send is a member function that takes sf::Packet by const reference or value
   INFO_LOG_FMT(NETPLAY, "Sent buffer change request to server: new_buffer_value = {}", new_buffer_value); // Corrected: Use {} for fmt
+}
+
+void NetPlayClient::RequestChangeGameFull(const UICommon::GameFile& game)
+{
+  if (!IsConnected())
+  {
+    WARN_LOG_FMT(NETPLAY, "Not connected, cannot send full change game request.");
+    return;
+  }
+
+  sf::Packet packet;
+  packet << MessageID::RequestChangeGameFull;
+
+  // Serialize core game info
+  packet << game.GetGameID();
+  std::array<u8, 20> sync_hash = game.GetSyncHash();
+  for (const u8& b : sync_hash)
+    packet << b;
+  packet << game.GetNetPlayName(Core::TitleDatabase{});
+  auto sync_id = game.GetSyncIdentifier();
+  packet << static_cast<u64>(sync_id.dol_elf_size);
+  packet << static_cast<u16>(sync_id.revision);
+  packet << static_cast<u8>(sync_id.disc_number);
+  packet << sync_id.is_datel;
+  packet << static_cast<u32>(game.GetRegion());
+  packet << static_cast<u32>(game.GetPlatform());
+
+  // Serialize Wii-specific data
+  bool has_wii_data = false;
+  std::vector<u8> tmd_bytes;
+  std::vector<u8> ticket_bytes;
+  std::vector<u8> cert_bytes;
+  if (game.GetPlatform() == DiscIO::Platform::WiiDisc || game.GetPlatform() == DiscIO::Platform::WiiWAD)
+  {
+    auto vol = DiscIO::CreateVolume(game.GetFilePath());
+    if (vol)
+    {
+      const auto part = vol->GetGamePartition();
+      const auto tmd = vol->GetTMD(part);
+      const auto ticket = vol->GetTicket(part);
+      const auto cert_chain = vol->GetCertificateChain(part);
+      if (tmd.IsValid())
+        tmd_bytes = tmd.GetBytes();
+      if (ticket.IsValid())
+        ticket_bytes = ticket.GetBytes();
+      cert_bytes = cert_chain;
+      has_wii_data = true;
+    }
+  }
+  packet << has_wii_data;
+  if (has_wii_data)
+  {
+    packet << static_cast<u32>(tmd_bytes.size());
+    for (auto b : tmd_bytes)
+      packet << b;
+    packet << static_cast<u32>(ticket_bytes.size());
+    for (auto b : ticket_bytes)
+      packet << b;
+    packet << static_cast<u32>(cert_bytes.size());
+    for (auto b : cert_bytes)
+      packet << b;
+  }
+
+  Send(packet);
+  INFO_LOG_FMT(NETPLAY, "Requested change game full: {} (hash={})", game.GetGameID(),
+               Common::SHA1::DigestToString(sync_hash));
 }
 
 void NetPlayClient::RequestChangeGameIdHash(const std::string& game_id,
