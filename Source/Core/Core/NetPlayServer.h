@@ -232,5 +232,6 @@ public:
   // 控制端口映射宽限期计数器
   static const unsigned int PAD_MAPPING_GRACE_FRAMES = 22; // 由公式 buffer_size(≤10)+ceil(RTT_max/16.7ms)(≈6)+安全裕度6 得出，共22帧
   unsigned int m_pad_mapping_grace_counter = 0; // 当前已消耗的宽限帧数
+  bool m_midjoin_waiting = false;
 };
 }  // namespace NetPlay

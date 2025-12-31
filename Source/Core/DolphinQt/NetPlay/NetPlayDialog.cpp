@@ -33,6 +33,7 @@
 #include "Common/HttpRequest.h"
 #include "Common/Logging/Log.h"
 #include "Common/TraversalClient.h"
+#include "Common/SFMLHelper.h"
 
 #include "Core/Boot/Boot.h"
 #include "Core/Config/GraphicsSettings.h"
@@ -143,6 +144,7 @@ void NetPlayDialog::CreateMainLayout()
   m_game_button = new QPushButton;
   m_start_button = new QPushButton(tr("Start"));
   m_upload_button = new QPushButton(tr("Upload Save"));
+  m_wait_new_user_button = new QPushButton(tr("等待加入"));
   m_buffer_size_box = new QSpinBox;
   m_buffer_label = new QLabel(tr("Buffer:"));
   m_quit_button = new QPushButton(tr("Quit"));
@@ -266,10 +268,11 @@ void NetPlayDialog::CreateMainLayout()
 
   options_widget->addWidget(m_start_button, 0, 0, Qt::AlignVCenter);
   options_widget->addWidget(m_upload_button, 0, 1, Qt::AlignVCenter);
-  options_widget->addWidget(m_buffer_label, 0, 2, Qt::AlignVCenter);
-  options_widget->addWidget(m_buffer_size_box, 0, 3, Qt::AlignVCenter);
-  options_widget->addWidget(m_quit_button, 0, 4, Qt::AlignVCenter | Qt::AlignRight);
-  options_widget->setColumnStretch(4, 1000);
+  options_widget->addWidget(m_wait_new_user_button, 0, 2, Qt::AlignVCenter);
+  options_widget->addWidget(m_buffer_label, 0, 3, Qt::AlignVCenter);
+  options_widget->addWidget(m_buffer_size_box, 0, 4, Qt::AlignVCenter);
+  options_widget->addWidget(m_quit_button, 0, 5, Qt::AlignVCenter | Qt::AlignRight);
+  options_widget->setColumnStretch(5, 1000);
 
   m_main_layout->addLayout(options_widget, 2, 0, 1, -1, Qt::AlignRight);
   m_main_layout->setRowStretch(1, 1000);
@@ -454,6 +457,7 @@ void NetPlayDialog::ConnectWidgets()
 
   connect(m_start_button, &QPushButton::clicked, this, &NetPlayDialog::OnStart);
   connect(m_upload_button, &QPushButton::clicked, this, &NetPlayDialog::OnUploadSave);
+  connect(m_wait_new_user_button, &QPushButton::clicked, this, &NetPlayDialog::OnWaitNewUser);
   connect(m_quit_button, &QPushButton::clicked, this, &NetPlayDialog::reject);
 
   connect(m_game_button, &QPushButton::clicked, [this] {
@@ -622,6 +626,30 @@ void NetPlayDialog::OnStart()
   }
 }
 
+void NetPlayDialog::OnWaitNewUser()
+{
+  auto client = Settings::Instance().GetNetPlayClient();
+  if (!client)
+    return;
+  sf::Packet pac;
+  if (!m_wait_new_user_active)
+  {
+    pac << static_cast<u8>(NetPlay::MessageID::MidJoinAwaitNewUser);
+    client->SendAsync(std::move(pac));
+    DisplayMessage(tr("请求暂停，等待新人加入"), "blue");
+    m_wait_new_user_active = true;
+    m_wait_new_user_button->setText(tr("取消等待"));
+  }
+  else
+  {
+    pac << static_cast<u8>(NetPlay::MessageID::MidJoinCancelAwait);
+    client->SendAsync(std::move(pac));
+    DisplayMessage(tr("取消等待，通知所有人继续"), "blue");
+    m_wait_new_user_active = false;
+    m_wait_new_user_button->setText(tr("等待加入"));
+  }
+}
+
 void NetPlayDialog::reject()
 {
   if (ModalMessageBox::question(this, tr("Confirmation"),
@@ -637,6 +665,9 @@ void NetPlayDialog::show(std::string nickname, bool use_traversal)
   m_use_traversal = use_traversal;
   m_buffer_size = 0;
   m_old_player_count = 0;
+  m_wait_new_user_active = false;
+  if (m_wait_new_user_button)
+    m_wait_new_user_button->setText(tr("等待加入"));
 
   m_room_box->clear();
   m_chat_edit->clear();
@@ -667,6 +698,7 @@ void NetPlayDialog::show(std::string nickname, bool use_traversal)
 #endif
   m_start_button->setHidden(false);
   m_upload_button->setHidden(is_hosting);
+  m_wait_new_user_button->setVisible(true);
   m_kick_button->setHidden(!is_hosting);
   m_assign_ports_button->setVisible(true);
   m_room_box->setHidden(!is_hosting);
@@ -766,6 +798,13 @@ void NetPlayDialog::UpdateGUI()
   // Allow start if game selected and not running, for both host and client
   bool game_can_start = game_selected && !game_running;
   m_start_button->setEnabled(game_can_start);
+  m_wait_new_user_button->setVisible(true);
+  m_wait_new_user_button->setEnabled(client != nullptr);
+  if (!game_running && m_wait_new_user_active)
+  {
+    m_wait_new_user_active = false;
+    m_wait_new_user_button->setText(tr("等待加入"));
+  }
 
   const bool is_hosting = server != nullptr;
   m_upload_button->setVisible(!is_hosting);

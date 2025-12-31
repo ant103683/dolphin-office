@@ -457,7 +457,7 @@ ConnectionError NetPlayServer::OnConnect(ENetPeer* incoming_connection, sf::Pack
   if (netplay_version != Common::GetScmRevGitStr())
     return ConnectionError::VersionMismatch;
 
-  if (m_is_running || m_start_pending)
+  if ((m_is_running || m_start_pending) && !m_midjoin_waiting)
     return ConnectionError::GameRunning;
 
   if (m_players.size() >= 255)
@@ -819,6 +819,20 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
     spac << msg;
 
     SendToClients(spac, player.pid);
+  }
+  break;
+
+  case MessageID::MidJoinAwaitNewUser:
+  {
+    m_midjoin_waiting = true;
+    SendPauseCommand();
+  }
+  break;
+  
+  case MessageID::MidJoinCancelAwait:
+  {
+    m_midjoin_waiting = false;
+    SendResumeCommand();
   }
   break;
 
