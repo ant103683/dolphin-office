@@ -7,8 +7,8 @@ plugins {
 
 @Suppress("UnstableApiUsage")
 android {
-    compileSdkVersion = "android-36"
-    ndkVersion = "27.0.12077973"
+    compileSdk = 34
+    ndkVersion = "26.1.10909125"
 
     buildFeatures {
         viewBinding = true
@@ -18,13 +18,10 @@ android {
     compileOptions {
         // Flag to enable support for the new language APIs
         isCoreLibraryDesugaringEnabled = true
-
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = "1.8"
     }
 
     lint {
@@ -93,7 +90,7 @@ android {
     externalNativeBuild {
         cmake {
             path = file("../../../CMakeLists.txt")
-            version = "3.22.1+"
+            version = "3.22.1"
         }
     }
     namespace = "org.dolphinemu.dolphinemu"
