@@ -783,6 +783,16 @@ void NetPlayServer::SendResumeCommand()
   SendToClients(spac);
 }
 
+void NetPlayServer::SendPrivateChat(PlayerId target_pid, PlayerId author_pid, const std::string& msg)
+{
+  sf::Packet pac;
+  pac << MessageID::ChatMessage;
+  pac << author_pid;
+  pac << msg;
+  if (const auto it = m_players.find(target_pid); it != m_players.end())
+    Send(it->second.socket, pac);
+}
+
 // called from ---NETPLAY--- thread
 unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
 {
@@ -2473,6 +2483,8 @@ bool NetPlayServer::StartGame()
   std::lock_guard lkg(m_crit.game);
   // only used as an identifier, not time value, so truncation is fine
   m_current_game = static_cast<u32>(Common::Timer::NowMs());
+
+  NetPlay::NetplayManager::GetInstance().resetClientsExceptHost_NoLock();
 
   // no change, just update with clients
   if (!m_host_input_authority)

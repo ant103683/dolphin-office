@@ -62,6 +62,8 @@ public:
   PadMappingArray GetPadMapping() const;
   void SetPadMapping(const PadMappingArray& mappings);
 
+  void SendPrivateChat(PlayerId target_pid, PlayerId author_pid, const std::string& msg);
+
   GBAConfigArray GetGBAConfig() const;
   void SetGBAConfig(const GBAConfigArray& configs, bool update_rom);
 

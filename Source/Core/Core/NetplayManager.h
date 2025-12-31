@@ -25,6 +25,7 @@ class GameFile;
 
 namespace NetPlay
 {
+class NetPlayServer;
 
 enum class LoadStatus
 {
@@ -39,6 +40,7 @@ struct ClientState
   int pid;
   bool is_active = false;
   LoadStatus state = LoadStatus::INIT;
+  int idle_seconds = 0;
 };
 
 class NetplayManager
@@ -85,6 +87,8 @@ public:
   bool setClientLoadStatusSuccess(int pid);
 
   void SetCurrentGame(const SyncIdentifier& si, const std::string& netplay_name);
+
+  void IdleTick(NetPlayServer& server);
 
 public:
   // 客户端状态管理

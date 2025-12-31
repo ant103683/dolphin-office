@@ -21,6 +21,7 @@
 #include <QSplitter>
 #include <QTableWidget>
 #include <QTextBrowser>
+#include <QTimer>
 
 #include <algorithm>
 #include <sstream>
@@ -116,6 +117,16 @@ NetPlayDialog::NetPlayDialog(const GameListModel& game_list_model,
 
   restoreGeometry(settings.value(QStringLiteral("netplaydialog/geometry")).toByteArray());
   m_splitter->restoreState(settings.value(QStringLiteral("netplaydialog/splitter")).toByteArray());
+
+  m_idle_timer = new QTimer(this);
+  m_idle_timer->setInterval(1000);
+  connect(m_idle_timer, &QTimer::timeout, this, [this] {
+    auto server = Settings::Instance().GetNetPlayServer();
+    if (!server)
+      return;
+    NetPlay::NetplayManager::GetInstance().IdleTick(*server);
+  });
+  m_idle_timer->start();
 }
 
 NetPlayDialog::~NetPlayDialog()

@@ -31,6 +31,7 @@ class QSpinBox;
 class QSplitter;
 class QTableWidget;
 class QTextEdit;
+class QTimer;
 
 class NetPlayDialog : public QDialog, public NetPlay::NetPlayUI
 {
@@ -169,6 +170,7 @@ private:
   GameDigestDialog* m_game_digest_dialog;
   ChunkedProgressDialog* m_chunked_progress_dialog;
   PadMappingDialog* m_pad_mapping;
+  QTimer* m_idle_timer;
   NetPlay::SyncIdentifier m_current_game_identifier;
   std::string m_current_game_name;
   Common::Lazy<std::string> m_external_ip_address;
