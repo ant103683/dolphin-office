@@ -47,6 +47,9 @@
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/GeckoCode.h"
+#include "Core/State.h"
+#include "Core/System.h"
+
 #include "Core/HW/EXI/EXI.h"
 #include "Core/HW/EXI/EXI_DeviceIPL.h"
 #ifdef HAS_LIBMGBA
@@ -86,6 +89,7 @@
 #include "UICommon/GameFile.h"
 #include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/VideoConfig.h"
+#include "VideoCommon/VideoEvents.h"
 
 #include "Core/TitleDatabase.h"
 
@@ -438,9 +442,34 @@ void NetPlayClient::OnData(sf::Packet& packet)
       }
     }
     break;
+  
+  case MessageID::PauseSimulationPure:
+    Core::QueueHostJob([this](Core::System& system) {
+      Core::SetState(system, Core::State::Paused);
+      const std::string upload_dir = File::GetUserPath(D_STATESAVES_IDX) + "upload" DIR_SEP;
+      if (File::Exists(upload_dir))
+        File::DeleteDirRecursively(upload_dir);
+      File::CreateFullPath(upload_dir);
+      const std::string upload_path = upload_dir + "upload.sav";
+      ::State::SaveAs(system, upload_path, true);
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+        File::IOFile log_file(log_path, "ab");
+        if (log_file)
+        {
+          const std::string& r = fmt::format("client saved upload.sav and sent MidJoinClientSaved\n");
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+      }
+      sf::Packet saved_packet;
+      saved_packet << MessageID::MidJoinClientSaved;
+      Send(saved_packet);
+    });
+    break;
 
   case MessageID::ResumeSimulation:
     Core::QueueHostJob([](Core::System& system) { Core::SetState(system, Core::State::Running); });
+    m_dialog->OnResumeSimulation();
     break;
 
   case MessageID::PadData:
@@ -532,6 +561,10 @@ void NetPlayClient::OnData(sf::Packet& packet)
     OnGameDigestAbort();
     break;
 
+  case MessageID::MidJoinRequestSaveUpload:
+    OnMidJoinRequestSaveUpload(packet);
+    break;
+
   default:
     PanicAlertFmtT("Unknown message received with id : {0}", static_cast<u8>(mid));
     break;
@@ -603,7 +636,7 @@ void NetPlayClient::OnChunkedDataStart(sf::Packet& packet)
 
   INFO_LOG_FMT(NETPLAY, "Starting data chunk {}.", cid);
 
-  m_chunked_data_receive_queue.emplace(cid, sf::Packet{});
+  m_chunked_data_receive_queue.emplace(cid, ChunkedDataInfo{sf::Packet{}, title});
 
   std::vector<int> players;
   players.push_back(m_local_player->pid);
@@ -624,8 +657,38 @@ void NetPlayClient::OnChunkedDataEnd(sf::Packet& packet)
 
   INFO_LOG_FMT(NETPLAY, "Ending data chunk {}.", cid);
 
-  auto& data_packet = data_packet_iter->second;
-  OnData(data_packet);
+  auto& info = data_packet_iter->second;
+
+  if (info.title == "Mid-Join Save")
+  {
+    const std::string mid_add_dir = File::GetUserPath(D_STATESAVES_IDX) + "midAdd" DIR_SEP;
+    if (File::Exists(mid_add_dir))
+      File::DeleteDirRecursively(mid_add_dir);
+    File::CreateFullPath(mid_add_dir);
+
+    const std::string temp_save_path = mid_add_dir + "temp.sav";
+
+    if (NetPlay::DecompressPacketIntoFile(info.packet, temp_save_path))
+    {
+      INFO_LOG_FMT(NETPLAY, "MidJoin save decompressed to {}.", temp_save_path);
+
+      m_is_mid_joining = true;
+
+      sf::Packet dec_packet;
+      dec_packet << MessageID::MidJoinNewUserDecompressed;
+      Send(dec_packet);
+      INFO_LOG_FMT(NETPLAY, "Sent MidJoinNewUserDecompressed.");
+    }
+    else
+    {
+      ERROR_LOG_FMT(NETPLAY, "Failed to decompress MidJoin save.");
+    }
+  }
+  else
+  {
+    OnData(info.packet);
+  }
+  
   m_chunked_data_receive_queue.erase(data_packet_iter);
   m_dialog->HideChunkedProgressDialog();
 
@@ -647,7 +710,7 @@ void NetPlayClient::OnChunkedDataPayload(sf::Packet& packet)
     return;
   }
 
-  auto& data_packet = data_packet_iter->second;
+  auto& data_packet = data_packet_iter->second.packet;
   while (!packet.endOfPacket())
   {
     u8 byte;
@@ -1002,7 +1065,99 @@ void NetPlayClient::OnStartGame(sf::Packet& packet)
     m_net_settings.is_hosting = m_local_player->IsHost();
   }
 
+#if IS_CLIENT
+  if (m_is_mid_joining && !m_mid_join_after_present_hook)
+  {
+    m_mid_join_after_present_count = 0;
+    m_mid_join_loading_invoked = false;
+    m_mid_join_first_present_ready_sent = false;
+    m_mid_join_after_present_hook = AfterPresentEvent::Register(
+        [this](PresentInfo& info) {
+          m_mid_join_after_present_count++;
+          if (!m_mid_join_first_present_ready_sent && m_mid_join_after_present_count >= 1)
+          {
+            sf::Packet win_packet;
+            win_packet << MessageID::MidJoinNewUserWindowStarted;
+            {
+              const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+              File::IOFile log_file(log_path, "ab");
+              if (log_file)
+              {
+                const std::string& r = fmt::format("client enqueue MidJoinNewUserWindowStarted\n");
+                log_file.WriteBytes(r.c_str(), r.size());
+              }
+            }
+            SendAsync(std::move(win_packet));
+            m_mid_join_first_present_ready_sent = true;
+            {
+              const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+              File::IOFile log_file(log_path, "ab");
+              if (log_file)
+              {
+                const std::string& r = fmt::format("client window started, sent MidJoinNewUserWindowStarted\n");
+                log_file.WriteBytes(r.c_str(), r.size());
+              }
+            }
+          }
+          if (m_mid_join_loading_invoked)
+            return;
+          if (m_mid_join_after_present_count < 2)
+            return;
+          Core::QueueHostJob([this](Core::System& system) {
+            Core::SetState(system, Core::State::Paused);
+            const std::string mid_add_dir = File::GetUserPath(D_STATESAVES_IDX) + "midAdd" DIR_SEP;
+            const std::string temp_save_path = mid_add_dir + "temp.sav";
+            ::State::LoadAs(system, temp_save_path);
+            {
+              const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+              File::IOFile log_file(log_path, "ab");
+              if (log_file)
+              {
+                const std::string& r = fmt::format("client loaded temp.sav, sent MidJoinNewUserLoaded\n");
+                log_file.WriteBytes(r.c_str(), r.size());
+              }
+            }
+            sf::Packet load_packet;
+            load_packet << MessageID::MidJoinNewUserLoaded;
+            {
+              const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+              File::IOFile log_file(log_path, "ab");
+              if (log_file)
+              {
+                const std::string& r = fmt::format("client enqueue MidJoinNewUserLoaded\n");
+                log_file.WriteBytes(r.c_str(), r.size());
+              }
+            }
+            SendAsync(std::move(load_packet));
+          });
+          m_mid_join_loading_invoked = true;
+          m_mid_join_after_present_hook.reset();
+          m_is_mid_joining = false;
+        },
+        "NetPlayMidJoinAfterFirstPresent");
+  }
+#endif
+
   m_dialog->OnMsgStartGame();
+
+#if IS_CLIENT
+  if (m_is_mid_joining)
+  {
+    sf::Packet win_packet2;
+    win_packet2 << MessageID::MidJoinNewUserWindowStarted;
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+      File::IOFile log_file(log_path, "ab");
+      if (log_file)
+      {
+        const std::string& r = fmt::format("client immediate MidJoinNewUserWindowStarted\n");
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+    }
+    SendAsync(std::move(win_packet2));
+    m_mid_join_first_present_ready_sent = true;
+  }
+#endif
 }
 
 void NetPlayClient::OnStopGame(sf::Packet& packet)
@@ -3134,6 +3289,87 @@ void NetPlayClient::TrySendInitialStateAck()
   Send(ack_packet);
 
   INFO_LOG_FMT(NETPLAY, "Sent initial state acknowledgement: {}.", initial_state_available);
+}
+
+void NetPlayClient::SendChunked(sf::Packet&& packet, const std::string& title)
+{
+  std::thread([this, p = std::move(packet), title]() mutable {
+    Common::SetCurrentThreadName("NetPlay Chunked Sender");
+    u32 cid = 0;
+    // Simple random CID generation to avoid collision (though unlikely with one uploader)
+    cid = static_cast<u32>(std::chrono::steady_clock::now().time_since_epoch().count());
+
+    const u64 total_size = p.getDataSize();
+    
+    sf::Packet start_pkg;
+    start_pkg << MessageID::ChunkedDataStart << cid << title;
+    start_pkg << total_size;
+    SendAsync(std::move(start_pkg), CHUNKED_DATA_CHANNEL);
+    
+    size_t offset = 0;
+    while (offset < total_size && IsConnected())
+    {
+      size_t chunk_size = std::min(CHUNKED_DATA_UNIT_SIZE, total_size - offset);
+      sf::Packet payload_pkg;
+      payload_pkg << MessageID::ChunkedDataPayload << cid;
+      payload_pkg.append(static_cast<const u8*>(p.getData()) + offset, chunk_size);
+      SendAsync(std::move(payload_pkg), CHUNKED_DATA_CHANNEL);
+      offset += chunk_size;
+      
+      // Basic rate limiting could go here if needed
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    
+    if (IsConnected())
+    {
+        sf::Packet end_pkg;
+        end_pkg << MessageID::ChunkedDataEnd << cid;
+        SendAsync(std::move(end_pkg), CHUNKED_DATA_CHANNEL);
+    }
+  }).detach();
+}
+
+void NetPlayClient::OnMidJoinRequestSaveUpload(sf::Packet& packet)
+{
+  INFO_LOG_FMT(NETPLAY, "Received MidJoinRequestSaveUpload.");
+
+  Core::QueueHostJob([this](Core::System& system) {
+      const std::string upload_dir = File::GetUserPath(D_STATESAVES_IDX) + "upload" DIR_SEP;
+
+      if (File::Exists(upload_dir))
+      {
+          File::DeleteDirRecursively(upload_dir);
+      }
+      File::CreateFullPath(upload_dir);
+
+      const std::string upload_path = upload_dir + "upload.sav";
+
+      INFO_LOG_FMT(NETPLAY, "Saving mid-join state to {}", upload_path);
+
+      ::State::SaveAs(system, upload_path, true);
+      if (File::Exists(upload_path))
+      {
+          INFO_LOG_FMT(NETPLAY, "MidJoin save created successfully. Compressing and sending...");
+
+          std::thread([this, upload_path]() {
+              Common::SetCurrentThreadName("NetPlay MidJoin Compressor");
+              sf::Packet compressed_packet;
+              if (NetPlay::CompressFileIntoPacket(upload_path, compressed_packet))
+              {
+                  INFO_LOG_FMT(NETPLAY, "Compression successful (size: {} bytes). Sending...", compressed_packet.getDataSize());
+                  SendChunked(std::move(compressed_packet), "Mid-Join Save");
+              }
+              else
+              {
+                  ERROR_LOG_FMT(NETPLAY, "Failed to compress MidJoin save file.");
+              }
+          }).detach();
+      }
+      else
+      {
+          ERROR_LOG_FMT(NETPLAY, "Failed to save MidJoin state.");
+      }
+  });
 }
 
 bool NetPlayClient::checkHasInitialStateSave()

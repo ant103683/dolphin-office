@@ -331,6 +331,22 @@ void NetPlayServer::ThreadFunc()
 
         sf::Packet rpac;
         rpac.append(netEvent.packet->data, netEvent.packet->dataLength);
+        {
+          int mid_hex = (netEvent.packet->dataLength >= 1)
+                            ? static_cast<int>(reinterpret_cast<const u8*>(netEvent.packet->data)[0])
+                            : -1;
+          if (mid_hex == static_cast<int>(MessageID::MidJoinNewUserWindowStarted))
+          {
+            const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+            File::IOFile log_file(log_path, "ab");
+            if (log_file)
+            {
+              const std::string& r = fmt::format("server receive event: channel={}, msg=0xb7\n",
+                                                 static_cast<int>(netEvent.channelID));
+              log_file.WriteBytes(r.c_str(), r.size());
+            }
+          }
+        }
 
         if (!netEvent.peer->data)
         {
@@ -459,6 +475,13 @@ ConnectionError NetPlayServer::OnConnect(ENetPeer* incoming_connection, sf::Pack
 
   if ((m_is_running || m_start_pending) && !m_midjoin_waiting)
     return ConnectionError::GameRunning;
+  
+  // MidJoin: If we are waiting for a new user, and game is running, trigger upload
+  if (m_midjoin_waiting && (m_is_running || m_start_pending))
+  {
+      INFO_LOG_FMT(NETPLAY, "New player joined during wait (MidJoin).");
+      // We will handle the upload trigger after assigning PID.
+  }
 
   if (m_players.size() >= 255)
     return ConnectionError::ServerFull;
@@ -527,9 +550,65 @@ ConnectionError NetPlayServer::OnConnect(ENetPeer* incoming_connection, sf::Pack
     UpdateWiimoteMapping();
   }
 
+  // MidJoin: Trigger upload from host
+  if (m_midjoin_waiting && (m_is_running || m_start_pending))
+  {
+      m_midjoin_pending_pid = new_player.pid;
+      INFO_LOG_FMT(NETPLAY, "Triggering MidJoin upload for new player {}.", m_midjoin_pending_pid);
+      TryTriggerMidJoinUpload();
+  }
+  
   return ConnectionError::NoError;
 }
 
+PlayerId NetPlayServer::SelectUploader()
+{
+  std::lock_guard lkp(m_crit.players);
+  
+  // Prioritize PID=2
+  if (m_players.count(2) && m_midjoin_pending_pid != 2)
+    return 2;
+
+  // Fallback to first non-host player
+  for (const auto& [pid, client] : m_players)
+  {
+    if (pid != 1 && pid != m_midjoin_pending_pid)
+      return pid;
+  }
+
+  // Fallback to host if only player
+  return 1;
+}
+
+void NetPlayServer::TryTriggerMidJoinUpload()
+{
+  if (!m_midjoin_waiting)
+    return;
+  if (m_midjoin_upload_sent)
+    return;
+  if (m_midjoin_pending_pid == 0)
+    return;
+  if (!m_midjoin_all_clients_saved)
+    return;
+
+  PlayerId uploader = SelectUploader();
+  INFO_LOG_FMT(NETPLAY, "Selected uploader for MidJoin: {}", uploader);
+
+  sf::Packet req;
+  req << MessageID::MidJoinRequestSaveUpload;
+  SendAsync(std::move(req), uploader);
+
+  m_midjoin_upload_sent = true;
+  {
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+    File::IOFile log_file(log_path, "ab");
+    if (log_file)
+    {
+      const std::string& r = fmt::format("server requested uploader {}, all saved complete\n", int(uploader));
+      log_file.WriteBytes(r.c_str(), r.size());
+    }
+  }
+}
 // called from ---NETPLAY--- thread
 unsigned int NetPlayServer::OnDisconnect(const Client& player)
 {
@@ -776,6 +855,13 @@ void NetPlayServer::SendPauseCommand()
   SendToClients(spac);
 }
 
+void NetPlayServer::SendPurePauseCommand()
+{
+  sf::Packet spac;
+  spac << MessageID::PauseSimulationPure;
+  SendToClients(spac);
+}
+
 void NetPlayServer::SendResumeCommand()
 {
   sf::Packet spac;
@@ -825,13 +911,46 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
   case MessageID::MidJoinAwaitNewUser:
   {
     m_midjoin_waiting = true;
-    SendPauseCommand();
+    m_midjoin_all_clients_saved = false;
+    m_midjoin_upload_sent = false;
+    m_midjoin_player_window_started = false;
+    m_midjoin_saved_clients.clear();
+    m_midjoin_baseline_pids.clear();
+    for (const auto& kv : m_players)
+    {
+      if (kv.second.pid != 1)
+        m_midjoin_baseline_pids.insert(kv.second.pid);
+    }
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+      File::IOFile log_file(log_path, "ab");
+      if (log_file)
+      {
+        const std::string& r = fmt::format("server midjoin await start, pure pause broadcast\n");
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+    }
+    SendPurePauseCommand();
   }
   break;
   
   case MessageID::MidJoinCancelAwait:
   {
     m_midjoin_waiting = false;
+    m_midjoin_all_clients_saved = false;
+    m_midjoin_upload_sent = false;
+    m_midjoin_player_window_started = false;
+    m_midjoin_saved_clients.clear();
+    m_midjoin_baseline_pids.clear();
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+      File::IOFile log_file(log_path, "ab");
+      if (log_file)
+      {
+        const std::string& r = fmt::format("server midjoin cancel await, resume broadcast\n");
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+    }
     SendResumeCommand();
   }
   break;
@@ -1090,6 +1209,236 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
     si.is_datel = is_datel;
     
     ChangeGame(si, netplay_name);
+  }
+  break;
+
+  case MessageID::ChunkedDataStart:
+  {
+    u32 cid;
+    std::string title;
+    packet >> cid >> title;
+    u64 total_size = Common::PacketReadU64(packet);
+    
+    INFO_LOG_FMT(NETPLAY, "Receive ChunkedDataStart from {}: cid={}, title={}, size={}", player.pid, cid, title, total_size);
+    
+    if (title == "Mid-Join Save")
+    {
+      const std::string temp_dir = File::GetUserPath(D_STATESAVES_IDX) + "server_temp" DIR_SEP;
+      if (File::Exists(temp_dir))
+        File::DeleteDirRecursively(temp_dir);
+      File::CreateFullPath(temp_dir);
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+        File::IOFile log_file(log_path, "ab");
+        if (log_file)
+        {
+          const std::string& r = fmt::format("server receiving upload start, clearing server_temp\n");
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+      }
+    }
+    
+    m_chunked_receive_buffers[player.pid][cid] = sf::Packet();
+  }
+  break;
+
+  case MessageID::ChunkedDataPayload:
+  {
+    u32 cid;
+    packet >> cid;
+    
+    if (m_chunked_receive_buffers[player.pid].count(cid))
+    {
+      auto& buffer = m_chunked_receive_buffers[player.pid][cid];
+      while (!packet.endOfPacket())
+      {
+        u8 byte;
+        packet >> byte;
+        buffer << byte;
+      }
+    }
+  }
+  break;
+
+  case MessageID::ChunkedDataEnd:
+  {
+    u32 cid;
+    packet >> cid;
+    
+    if (m_chunked_receive_buffers[player.pid].count(cid))
+    {
+      sf::Packet& full_packet = m_chunked_receive_buffers[player.pid][cid];
+      INFO_LOG_FMT(NETPLAY, "Receive ChunkedDataEnd from {}: cid={}, size={}", player.pid, cid, full_packet.getDataSize());
+      
+      // MidJoin Logic
+      if (m_midjoin_waiting && m_midjoin_pending_pid != 0)
+      {
+           // Save to server_temp
+           const std::string temp_dir = File::GetUserPath(D_STATESAVES_IDX) + "server_temp" DIR_SEP;
+           const std::string temp_path = temp_dir + "midjoin_session.sav.zip";
+           
+           // Clone packet for re-sending (compressed)
+           sf::Packet packet_copy = full_packet;
+           
+           // Save compressed file for debug/backup
+           std::ofstream ofs(temp_path, std::ios::binary);
+           if (ofs)
+           {
+               ofs.write(reinterpret_cast<const char*>(full_packet.getData()), full_packet.getDataSize());
+           }
+
+           if (m_players.count(m_midjoin_pending_pid))
+           {
+               // Forward Compressed Save (Chunked)
+               SendChunked(std::move(packet_copy), m_midjoin_pending_pid, "Mid-Join Save");
+               INFO_LOG_FMT(NETPLAY, "Forwarding MidJoin Save to new player {}.", m_midjoin_pending_pid);
+               {
+                 const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+                 File::IOFile log_file(log_path, "ab");
+                 if (log_file)
+                 {
+                   const std::string& r = fmt::format("server forwarded save to new player\n");
+                   log_file.WriteBytes(r.c_str(), r.size());
+                 }
+               }
+           }
+      }
+
+      m_chunked_receive_buffers[player.pid].erase(cid);
+    }
+  }
+  break;
+
+  case MessageID::MidJoinClientSaved:
+  {
+    if (m_midjoin_waiting)
+    {
+      if (m_midjoin_baseline_pids.contains(player.pid))
+      {
+        m_midjoin_saved_clients.insert(player.pid);
+        {
+          const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+          File::IOFile log_file(log_path, "ab");
+          if (log_file)
+          {
+            const std::string& r = fmt::format("server baseline save ready {}/{}\n",
+                                               int(m_midjoin_saved_clients.size()),
+                                               int(m_midjoin_baseline_pids.size()));
+            log_file.WriteBytes(r.c_str(), r.size());
+          }
+        }
+        if (m_midjoin_saved_clients.size() == m_midjoin_baseline_pids.size())
+        {
+          m_midjoin_all_clients_saved = true;
+          TryTriggerMidJoinUpload();
+        }
+      }
+    }
+  }
+  break;
+
+  case MessageID::MidJoinNewUserDecompressed:
+  {
+    if (m_midjoin_waiting && player.pid == m_midjoin_pending_pid)
+    {
+      m_midjoin_player_decompressed = true;
+      sf::Packet start_game_packet;
+      BuildStartGamePacket(start_game_packet);
+      SendAsync(std::move(start_game_packet), player.pid);
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+        File::IOFile log_file(log_path, "ab");
+        if (log_file)
+        {
+          const std::string& r = fmt::format("server received new user decompress, send StartGame\n");
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+      }
+    }
+  }
+  break;
+
+  case MessageID::MidJoinNewUserWindowStarted:
+  {
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+      File::IOFile log_file(log_path, "ab");
+      if (log_file)
+      {
+        const std::string& r = fmt::format("OnData: MidJoinNewUserWindowStarted from {} (pending={})\n", player.pid, m_midjoin_pending_pid);
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+    }
+    // m_midjoin_waiting && player.pid == m_midjoin_pending_pid
+    if (1)
+    {
+      if (!m_midjoin_player_window_started)
+      {
+        m_midjoin_player_window_started = true;
+        SendResumeCommand();
+        {
+          const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+          File::IOFile log_file(log_path, "ab");
+          if (log_file)
+          {
+            const std::string& r = fmt::format("server received new user window started, broadcast Resume\n");
+            log_file.WriteBytes(r.c_str(), r.size());
+          }
+        }
+        {
+          const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+          File::IOFile log_file(log_path, "ab");
+          if (log_file)
+          {
+            const std::string& r = fmt::format("state: waiting={}, window_started={}\n",
+                                               m_midjoin_waiting ? 1 : 0,
+                                               m_midjoin_player_window_started ? 1 : 0);
+            log_file.WriteBytes(r.c_str(), r.size());
+          }
+        }
+      }
+    }
+  }
+  break;
+
+  case MessageID::MidJoinNewUserLoaded:
+  {
+    if (m_midjoin_waiting && player.pid == m_midjoin_pending_pid)
+    {
+      m_midjoin_waiting = false;
+      m_midjoin_pending_pid = 0;
+      m_midjoin_player_decompressed = false;
+      m_midjoin_player_window_started = false;
+      m_midjoin_all_clients_saved = false;
+      m_midjoin_upload_sent = false;
+      m_midjoin_saved_clients.clear();
+      m_midjoin_baseline_pids.clear();
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+        File::IOFile log_file(log_path, "ab");
+        if (log_file)
+        {
+          const std::string& r = fmt::format("server received new user loaded, session reset\n");
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+      }
+      SendResumeCommand();
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+        File::IOFile log_file(log_path, "ab");
+        if (log_file)
+        {
+          const std::string& r = fmt::format("server loaded final Resume broadcast\n");
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+      }
+    }
+  }
+  break;
+
+  case MessageID::Ready:
+  {
+      OnReady(packet, player);
   }
   break;
 
@@ -1401,6 +1750,17 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
       const std::string& r = fmt::format("Player {} reported HasInitialStateSave = {}\n",
                                            player.pid, has_initial_state);
       log_file.WriteBytes(r.c_str(), r.size());
+    }
+    if (m_midjoin_waiting)
+    {
+      if (log_file)
+      {
+        const std::string& r =
+            fmt::format("ClientInitialStateAck ignored due to mid-join waiting (pid={}, has_initial={})\n",
+                        player.pid, has_initial_state);
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+      break;
     }
     if (has_initial_state) {
       if (log_file)
@@ -2507,8 +2867,6 @@ bool NetPlayServer::StartGame()
   m_current_golfer = 1;
   m_pending_golfer = 0;
 
-  const u64 initial_rtc = GetInitialNetPlayRTC();
-
 #if IS_SERVER
   // Server mode: derive region directory without relying on GameFile.
   // Prefer configured fallback; region-specific handling is not required for hosting.
@@ -2526,6 +2884,17 @@ bool NetPlayServer::StartGame()
 
   // tell clients to start game
   sf::Packet spac;
+  BuildStartGamePacket(spac);
+  SendAsyncToClients(std::move(spac));
+
+  m_start_pending = false;
+  m_is_running = true;
+
+  return true;
+}
+
+void NetPlayServer::BuildStartGamePacket(sf::Packet& spac)
+{
   spac << MessageID::StartGame;
   spac << m_current_game;
   spac << m_settings.cpu_thread;
@@ -2601,7 +2970,21 @@ bool NetPlayServer::StartGame()
   spac << m_settings.savedata_write;
   spac << m_settings.savedata_sync_all_wii;
   spac << m_settings.strict_settings_sync;
+  
+  const u64 initial_rtc = GetInitialNetPlayRTC();
   spac << initial_rtc;
+
+#if IS_SERVER
+  // Server mode: derive region directory without relying on GameFile.
+  // Prefer configured fallback; region-specific handling is not required for hosting.
+  const DiscIO::Region used_region = Config::Get(Config::MAIN_FALLBACK_REGION);
+  const std::string region =
+      Config::GetDirectoryForRegion(Config::ToGameCubeRegion(used_region));
+#else
+  const std::string region = Config::GetDirectoryForRegion(
+      Config::ToGameCubeRegion(m_dialog->FindGameFile(m_selected_game_identifier)->GetRegion()));
+#endif
+
   spac << region;
   spac << m_settings.sync_codes;
 
@@ -2611,13 +2994,6 @@ bool NetPlayServer::StartGame()
 
   for (size_t i = 0; i < sizeof(m_settings.sram); ++i)
     spac << m_settings.sram[i];
-
-  SendAsyncToClients(std::move(spac));
-
-  m_start_pending = false;
-  m_is_running = true;
-
-  return true;
 }
 
 void NetPlayServer::AbortGameStart()
@@ -3579,6 +3955,12 @@ void NetPlayServer::OnRequestStartGameClient(Client& player)
   }
 
   // RequestStartGame();
+}
+
+void NetPlayServer::OnReady(sf::Packet& packet, Client& player)
+{
+  // MidJoin logic moved to dedicated messages (MidJoinNewUserWindowStarted, etc.)
+  // OnReady is no longer used for mid-join state transitions.
 }
 
 }  // namespace NetPlay

@@ -650,6 +650,13 @@ void NetPlayDialog::OnWaitNewUser()
   }
 }
 
+void NetPlayDialog::OnResumeSimulation()
+{
+  m_wait_new_user_active = false;
+  if (m_wait_new_user_button)
+    m_wait_new_user_button->setText(tr("等待加入"));
+  DisplayMessage(tr("等待已结束，继续游戏"), "blue");
+}
 void NetPlayDialog::reject()
 {
   if (ModalMessageBox::question(this, tr("Confirmation"),
