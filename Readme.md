@@ -1,5 +1,6 @@
 # Dolphin - 联机对战功能优化
 
+  请直接使用dev-2509分支;
   这是一个专门为联机相关功能添加功能的版本, 目前已经支持:
 
 通用功能:
@@ -28,53 +29,52 @@
    开发初衷是让新玩家可以更加简单的上手模拟器, 以及联机功能; 目前依旧正在开发中, 并且由于我是独自开发, 许多新功能没有经过严格的测试, 而且很多地方的实现应该采用更好的方法, 目前大部分代码是通过Trae实现的.
 
 # Dolphin - NetPlay Optimization
-This is a specialized version of the Dolphin Emulator focused on enhancing and streamlining the NetPlay experience.
 
-General Features
-Custom Key Labels: You can now create templates for each game to label the specific functions of every button.
+This is a specialized fork of the Dolphin Emulator, specifically enhanced for an improved **NetPlay** (online multiplayer) experience.
 
-Automatic Image Path: The emulator now automatically adds the iso_files folder (located in the same directory) as the default search path, making it much easier for beginners to get started.
+---
 
-Streamlined Controller Setup: Since Wii Remotes are rarely used for NetPlay in certain regions, clicking the "Controllers" button on the main UI now directly opens the Standard Controller settings for Players 1–4. This skips unnecessary menus and takes you straight to the most common configuration screen.
+## 🚀 General Features
 
-Hash-Based Save Management: Game saves are now determined by a combination of the Game ID and its Hash value. This allows different Mod versions of the same game to have their own independent save progress.
+* **Custom Key Labels**: Create templates to label specific button functions for each game.
+* **Automatic Image Path**: The emulator automatically sets the `iso_files` directory as the default path for easier initial setup.
+* **Streamlined Controller Setup**: Clicking the "Controllers" button now directly opens the **Standard Controller** settings for Players 1-4, skipping unnecessary Wii Remote menus.
+* **Hash-Based Save Management**: Save files are now identified by both **Game ID** and **Hash Value**. This allows different Mod versions of the same game to have independent save data.
+* **UI Enhancements**: Added a quick-input box for NetPlay and a dedicated **NetPlay Lobby** to the main interface.
 
-Enhanced Main UI: Added a quick-input box for NetPlay and a dedicated NetPlay Lobby for easier access to rooms.
+---
 
-NetPlay Improvements
-The emulator is now split into two versions: Server and Client.
+## 🌐 NetPlay Enhancements
 
-1. Server Version (Headless/Host)
+The project is now divided into two versions: **Server** (Headless) and **Client**.
 
-Bridge Mode: When hosting, the server version no longer renders the game; it acts solely as a data transmission bridge. This allows multiple rooms to run on low-spec cloud servers (e.g., 2C2G) simply by using different ports.
+### 1. Server Version (Host)
+* **Bridge Mode**: When hosting, the server acts solely as a data bridge and does not render the game. This allows low-spec cloud servers (e.g., **2C2G**) to host multiple rooms on different ports.
+* **No ISO Required**: The server version does not require game image files to run.
+* **Universal Wii Support**: (Beta) Supports various Wii games; clients will sync game information to the server automatically.
+* **Client-Assisted Saves**: Since the host doesn't run the game, players can use the **"Upload Save"** button in the NetPlay window to sync progress back to the server.
+* **Anti-Idle System**: To optimize server resources, idle clients (not in-game) will be kicked after **15 minutes**.
 
-No ISO Required: Since the server does not execute the game logic, it no longer requires game image files.
+### 2. Client Version
+* **Enhanced Permissions**: Connected clients can now **Start Game**, **Adjust Buffer**, **Change Game**, and **Remap Players**.
 
-Universal Wii Support: Currently supports all Wii games (other platforms pending test). When a client changes the game, the relevant info is synced to the server.
+---
 
-Client-Assisted Saves: Since the host doesn't run the game, saving progress is handled by clients. Players can click the "Upload Save" button in the NetPlay window to sync their progress back to the server.
+## 🆕 Advanced Functions
 
-Anti-Idle System: To prevent room congestion, clients that remain idle without starting a game for more than 15 minutes will be automatically kicked.
+* **Mid-Game Remapping**: Swap player slots (e.g., 1P and 2P) or change an observer to a player **during the session** without restarting.
+* **Instant Start (Savestate Sync)**: Skip intro animations by booting directly from a savestate. 
+    * Place identical files in `Dolphin Emulation/StateSaves/initial/`.
+    * Format: `GameID_Hash.sav` (e.g., `RDSJAF_531c9777.sav`).
+* **Late-Join Support**: New players can join mid-session! The game will pause while the new player receives the current **Savestate** from the server. (Transmission speed depends on server bandwidth).
 
-2. Client Version
+---
 
-Enhanced Permissions: Once connected, clients have the authority to Start Game, Adjust Buffer, Change Game, and Remap Players.
+## 📝 Note from Developer
 
-Save Synchronization: Fully supports the new save upload functionality.
+This project aims to lower the barrier for new players to enjoy Dolphin's NetPlay. It is currently a **Work In Progress (WIP)** and developed solely by me. Many features are still in testing. 
 
-New NetPlay Functionality
-Mid-Game Player Remapping: You can now swap player slots (e.g., 1P and 2P) or assign a "None" observer to a player slot during the session. There is no longer a need to restart the game to change who is playing.
-
-Instant Start via Savestates: Games can now boot directly into a specific savestate. By placing a specific .sav file in Dolphin Emulation/StateSaves/initial/ (named following the format GameID_Hash.sav), all players will skip the intro animations and start exactly from that point.
-
-Note: A UI button to automate this file naming and placement is coming soon.
-
-Late-Join Support: New players can now join in the middle of a game! By clicking "Wait for Join," the session will pause, and the new player will receive the current savestate from the server.
-
-Note: Sync speed is dependent on the server's upload bandwidth.
-
-Conclusion
-The goal of this project is to lower the barrier to entry for new players using the Dolphin emulator and its NetPlay features. This is a solo project and is currently a Work in Progress (WIP). Please note that many features have not undergone rigorous stress testing. Much of the implementation was assisted by Trae (AI), and I am continuously looking for better ways to optimize the codebase.
+> **Implementation Note**: Significant portions of the code logic were implemented with the assistance of **Trae** (AI). I am actively working on optimizing the codebase for better performance and stability.
 
 # Dolphin - A GameCube and Wii Emulator
 
