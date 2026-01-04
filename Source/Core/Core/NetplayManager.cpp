@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "Core/NetplayManager.h"
 #include "NetPlayServer.h"
+#include "NetPlayProto.h"
+#include "Core/Config/NetplaySettings.h"
+#include "Common/Config/Config.h"
 
 #include "Common/CommonPaths.h"
 #include "Common/FileUtil.h"
@@ -96,6 +99,7 @@ void NetplayManager::activeClientWithPid(int pid)
   std::lock_guard<std::mutex> lock(m_mutex);
   m_client_states[pid-1].is_active = true;
   m_client_states[pid-1].state = LoadStatus::INIT;
+  m_client_states[pid-1].idle_seconds = 0;
 }
 
 void NetplayManager::setClientLoadStatus(LoadStatus status,int pid) {
@@ -119,6 +123,7 @@ void NetplayManager::deactiveClientWithPid(int pid)
   std::lock_guard<std::mutex> lock(m_mutex);
   m_client_states[pid-1].is_active = false;
   m_client_states[pid-1].state = LoadStatus::INIT;
+  m_client_states[pid-1].idle_seconds = 0;
 }
 
 void NetplayManager::resetClientsExceptHost_NoLock()
@@ -128,6 +133,7 @@ void NetplayManager::resetClientsExceptHost_NoLock()
     if (client.pid == 1) // Host PID is 1
       continue;
     client.state = LoadStatus::INIT;
+    client.idle_seconds = 0;
   }
 }
 
@@ -195,6 +201,38 @@ void NetplayManager::SetCurrentGame(const SyncIdentifier& si, const std::string&
   cg.hash8 = Common::SHA1::DigestToString(si.sync_hash).substr(0, 8);
   cg.name = netplay_name;
   m_current_game = std::move(cg);
+}
+
+void NetplayManager::IdleTick(NetPlayServer& server)
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  if (server.IsRunning())
+  {
+    for (auto& client : m_client_states)
+    {
+      if (client.pid == 1)
+        continue;
+      client.idle_seconds = 0;
+    }
+    return;
+  }
+  for (auto& client : m_client_states)
+  {
+    if (client.pid == 1)
+      continue;
+    if (!client.is_active)
+      continue;
+    client.idle_seconds += 1;
+    const u32 timeout_sec = Config::Get(Config::NETPLAY_IDLE_TIMEOUT_SEC);
+    if (client.idle_seconds >= static_cast<int>(timeout_sec))
+    {
+      server.SendPrivateChat(static_cast<NetPlay::PlayerId>(client.pid), NetPlay::PlayerId{1},
+                             std::string("长时间未进入游戏,已被移出房间"));
+      server.KickPlayer(static_cast<NetPlay::PlayerId>(client.pid));
+      client.idle_seconds = 0;
+      client.state = LoadStatus::INIT;
+    }
+  }
 }
 
 }  // namespace NetPlay

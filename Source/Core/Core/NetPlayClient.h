@@ -18,6 +18,7 @@
 
 #include "Common/CommonTypes.h"
 #include "Common/Event.h"
+#include "Common/HookableEvent.h"
 #include "Common/SPSCQueue.h"
 #include "Common/TraversalClient.h"
 #include "Core/NetPlayProto.h"
@@ -61,6 +62,7 @@ public:
   virtual void OnMsgStartGame() = 0;
   virtual void OnMsgStopGame() = 0;
   virtual void OnMsgPowerButton() = 0;
+  virtual void OnResumeSimulation() = 0;
   virtual void OnPlayerConnect(const std::string& player) = 0;
   virtual void OnPlayerDisconnect(const std::string& player) = 0;
   virtual void OnPadBufferChanged(u32 buffer) = 0;
@@ -113,6 +115,7 @@ class NetPlayClient : public Common::TraversalClientClient
 public:
   void ThreadFunc();
   void SendAsync(sf::Packet&& packet, u8 channel_id = DEFAULT_CHANNEL);
+  void SendChunked(sf::Packet&& packet, const std::string& title);
 
   NetPlayClient(const std::string& address, const u16 port, NetPlayUI* dialog,
                 const std::string& name, const NetTraversalConfig& traversal_config);
@@ -330,11 +333,18 @@ private:
   void OnGameDigestResult(sf::Packet& packet);
   void OnGameDigestError(sf::Packet& packet);
   void OnGameDigestAbort();
+  void OnMidJoinRequestSaveUpload(sf::Packet& packet);
 
   bool m_is_connected = false;
   ConnectionState m_connection_state = ConnectionState::Failure;
 
   bool m_has_pending_initial_state_ack = false;
+  bool m_is_mid_joining = false;
+  int m_mid_join_state_callback_id = -1;
+  Common::EventHook m_mid_join_after_present_hook;
+  int m_mid_join_after_present_count = 0;
+  bool m_mid_join_loading_invoked = false;
+  bool m_mid_join_first_present_ready_sent = false;
   PlayerId m_pid = 0;
   NetSettings m_net_settings{};
   std::map<PlayerId, Player> m_players;
@@ -356,7 +366,13 @@ private:
   u16 m_sync_ar_codes_count = 0;
   u16 m_sync_ar_codes_success_count = 0;
   bool m_sync_ar_codes_complete = false;
-  std::unordered_map<u32, sf::Packet> m_chunked_data_receive_queue;
+
+  struct ChunkedDataInfo
+  {
+    sf::Packet packet;
+    std::string title;
+  };
+  std::unordered_map<u32, ChunkedDataInfo> m_chunked_data_receive_queue;
 
   u64 m_initial_rtc = 0;
   u32 m_timebase_frame = 0;

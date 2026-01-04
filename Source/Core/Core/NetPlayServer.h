@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <set>
 
 #include "Common/Event.h"
 #include "Common/QoSSession.h"
@@ -58,9 +59,12 @@ public:
   void AbortGameStart();
   void SendPauseCommand();
   void SendResumeCommand();
+  void SendPurePauseCommand();
 
   PadMappingArray GetPadMapping() const;
   void SetPadMapping(const PadMappingArray& mappings);
+
+  void SendPrivateChat(PlayerId target_pid, PlayerId author_pid, const std::string& msg);
 
   GBAConfigArray GetGBAConfig() const;
   void SetGBAConfig(const GBAConfigArray& configs, bool update_rom);
@@ -138,7 +142,7 @@ private:
   void SendResponseToAllPlayers(const MessageID message_id, Data&&... data_to_send);
   void SendToClients(const sf::Packet& packet, PlayerId skip_pid = 0,
                      u8 channel_id = DEFAULT_CHANNEL);
-  void Send(ENetPeer* socket, const sf::Packet& packet, u8 channel_id = DEFAULT_CHANNEL);
+   void Send(ENetPeer* socket, const sf::Packet& packet, u8 channel_id = DEFAULT_CHANNEL);
   ConnectionError OnConnect(ENetPeer* socket, sf::Packet& received_packet);
   unsigned int OnDisconnect(const Client& player);
   unsigned int OnData(sf::Packet& packet, Client& player);
@@ -164,8 +168,11 @@ private:
   // returns the PID given
   PlayerId GiveFirstAvailableIDTo(ENetPeer* player);
 
+  PlayerId SelectUploader();
+
   // --- 声明新消息的处理函数 ---
   void OnRequestStartGameClient(Client& player);
+  void BuildStartGamePacket(sf::Packet& spac);
 
   NetSettings m_settings;
 
@@ -213,6 +220,7 @@ private:
   std::thread m_chunked_data_thread;
   u32 m_next_chunked_data_id = 0;
   std::unordered_map<u32, unsigned int> m_chunked_data_complete_count;
+  std::map<PlayerId, std::map<u32, sf::Packet>> m_chunked_receive_buffers;
   bool m_abort_chunked_data = false;
 
   ENetHost* m_server = nullptr;
@@ -230,5 +238,16 @@ public:
   // 控制端口映射宽限期计数器
   static const unsigned int PAD_MAPPING_GRACE_FRAMES = 22; // 由公式 buffer_size(≤10)+ceil(RTT_max/16.7ms)(≈6)+安全裕度6 得出，共22帧
   unsigned int m_pad_mapping_grace_counter = 0; // 当前已消耗的宽限帧数
+  bool m_midjoin_waiting = false;
+  PlayerId m_midjoin_pending_pid = 0;
+  bool m_midjoin_player_decompressed = false;
+  bool m_midjoin_player_window_started = false;
+  bool m_midjoin_all_clients_saved = false;
+  bool m_midjoin_upload_sent = false;
+  std::set<PlayerId> m_midjoin_saved_clients;
+  std::set<PlayerId> m_midjoin_baseline_pids;
+
+  void OnReady(sf::Packet& packet, Client& player);
+  void TryTriggerMidJoinUpload();
 };
 }  // namespace NetPlay

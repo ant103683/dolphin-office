@@ -184,6 +184,15 @@ enum class MessageID : u8
   // Server notifies client that requested game does not exist on server list
   ChangeGameNotFound = 0xAF,
 
+  MidJoinAwaitNewUser = 0xAD,
+  MidJoinCancelAwait = 0xB2,
+  MidJoinRequestSaveUpload = 0xB3,
+  PauseSimulationPure = 0xB4,
+  MidJoinClientSaved = 0xB5,
+  MidJoinNewUserDecompressed = 0xB6,
+  MidJoinNewUserWindowStarted = 0xB7,
+  MidJoinNewUserLoaded = 0xB8,
+
 
   TimeBase = 0xB0,
   DesyncDetected = 0xB1,
