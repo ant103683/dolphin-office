@@ -1,3 +1,81 @@
+# Dolphin - 联机对战功能优化
+
+  这是一个专门为联机相关功能添加功能的版本, 目前已经支持:
+
+通用功能:
+  1. 自定义键位label:你可以为你的游戏添加每个按键对应的功能的模板;
+  2. 自动添加镜像路径:现在, 模拟器会自动添加同等级的iso_files作为默认路径, 这是为了方便新手的第一次使用;
+  3. 在中国, wii遥控器几乎未被使用, 所以现在点击主界面的控制器按钮, 会直接弹出1P ~ 4P给玩家选择, 并跳转到"标准控制器"设置界面, 这是目前为止我了解到的最常见的键位设置界面;
+  4. 现在, 存档会根据镜像文件的ID和哈希值共同决定, 而不是单纯的ID, 这样, 不同Mod版本的同个ID游戏也可以独享自己的存档进度;
+  5. 主界面添加联机快捷输入框, 以及联机大厅(Netplay Hall)
+   
+联机相关:
+1. 现在被分为两个版本, 纯服务器版本和客户端版本
+2. 服务器版本:
+   1. 服务器版本作为主机使用的时候, 不再进入游戏, 而仅仅作为数据传输的桥梁; 在一台低配置的云服务器上面(例如2H2G), 也可以开几个房间, 只需要设置端口不同即可;
+   2. 由于不再需要进入游戏, 现在服务器版本不再需要游戏镜像文件;
+   3. 现在服务器版本支持任意Wii游戏(暂时未测试其他游戏), 客户端修改游戏的时候会把相关游戏信息上传给服务器;
+   4. 由于服务器版本的主机已经不再进入游戏, 所以存档上传需要借助客户端, 现在客户端如果想要保存本次游玩的进度, 需要点击联机窗口的"上传文档"按钮;
+   5. 为了防止部分客户端在服务器内闲置, 现在不进入游戏并且超过15分支的客户端会被踢出房间
+3. 客户端版本:
+   1. 现在客户端版本连接进入房间后, 拥有"开始游戏"、"调节缓冲"、"更换游戏"、"更换玩家映射"权限, 具备上传存档功能;
+4. 联机新功能:
+   1. 游戏中途可以直接更换玩家映射, 例如1P和2P互换, 或者把一个只能观战的映射为none的玩家调为1P或者2P等, 总之, 如果多个朋友一起玩对战游戏(例如BT3), 不再需要关闭游戏并重新打开来更换映射;
+   2. 游戏可以从某个即时存档状态直接开始, 只要所有的客户端在Dolphin Emulation/StateSaves/initial/路径上放置同个即时存档文件, 并按照特定的格式命名, 游戏开始后所有人都会从这个即时存档状态开始游戏, 不再需要等待漫长的开始动画, 例如原版的日版BT3镜像: RDSJAF_531c9777.sav, 其中RDSJAF是游戏ID, 531c9777则是文件哈希值的前八位, 关于这点后续会补充按钮, 让用户直接保存到目标文件夹, 无须自己手动操作;
+   3. 现在, 游戏中途也可以加入新的玩家! 玩家只需要在联机窗口点击"等待加入", 新玩家即可连接进入房间; 这个时候所有人的游戏会被暂停, 并且新玩家会接收服务器发送的即时存档, 速度取决于服务器带宽
+
+总结:
+   开发初衷是让新玩家可以更加简单的上手模拟器, 以及联机功能; 目前依旧正在开发中, 并且由于我是独自开发, 许多新功能没有经过严格的测试, 而且很多地方的实现应该采用更好的方法, 目前大部分代码是通过Trae实现的.
+
+# Dolphin - NetPlay Optimization
+This is a specialized version of the Dolphin Emulator focused on enhancing and streamlining the NetPlay experience.
+
+General Features
+Custom Key Labels: You can now create templates for each game to label the specific functions of every button.
+
+Automatic Image Path: The emulator now automatically adds the iso_files folder (located in the same directory) as the default search path, making it much easier for beginners to get started.
+
+Streamlined Controller Setup: Since Wii Remotes are rarely used for NetPlay in certain regions, clicking the "Controllers" button on the main UI now directly opens the Standard Controller settings for Players 1–4. This skips unnecessary menus and takes you straight to the most common configuration screen.
+
+Hash-Based Save Management: Game saves are now determined by a combination of the Game ID and its Hash value. This allows different Mod versions of the same game to have their own independent save progress.
+
+Enhanced Main UI: Added a quick-input box for NetPlay and a dedicated NetPlay Lobby for easier access to rooms.
+
+NetPlay Improvements
+The emulator is now split into two versions: Server and Client.
+
+1. Server Version (Headless/Host)
+
+Bridge Mode: When hosting, the server version no longer renders the game; it acts solely as a data transmission bridge. This allows multiple rooms to run on low-spec cloud servers (e.g., 2C2G) simply by using different ports.
+
+No ISO Required: Since the server does not execute the game logic, it no longer requires game image files.
+
+Universal Wii Support: Currently supports all Wii games (other platforms pending test). When a client changes the game, the relevant info is synced to the server.
+
+Client-Assisted Saves: Since the host doesn't run the game, saving progress is handled by clients. Players can click the "Upload Save" button in the NetPlay window to sync their progress back to the server.
+
+Anti-Idle System: To prevent room congestion, clients that remain idle without starting a game for more than 15 minutes will be automatically kicked.
+
+2. Client Version
+
+Enhanced Permissions: Once connected, clients have the authority to Start Game, Adjust Buffer, Change Game, and Remap Players.
+
+Save Synchronization: Fully supports the new save upload functionality.
+
+New NetPlay Functionality
+Mid-Game Player Remapping: You can now swap player slots (e.g., 1P and 2P) or assign a "None" observer to a player slot during the session. There is no longer a need to restart the game to change who is playing.
+
+Instant Start via Savestates: Games can now boot directly into a specific savestate. By placing a specific .sav file in Dolphin Emulation/StateSaves/initial/ (named following the format GameID_Hash.sav), all players will skip the intro animations and start exactly from that point.
+
+Note: A UI button to automate this file naming and placement is coming soon.
+
+Late-Join Support: New players can now join in the middle of a game! By clicking "Wait for Join," the session will pause, and the new player will receive the current savestate from the server.
+
+Note: Sync speed is dependent on the server's upload bandwidth.
+
+Conclusion
+The goal of this project is to lower the barrier to entry for new players using the Dolphin emulator and its NetPlay features. This is a solo project and is currently a Work in Progress (WIP). Please note that many features have not undergone rigorous stress testing. Much of the implementation was assisted by Trae (AI), and I am continuously looking for better ways to optimize the codebase.
+
 # Dolphin - A GameCube and Wii Emulator
 
 [Homepage](https://dolphin-emu.org/) | [Project Site](https://github.com/dolphin-emu/dolphin) | [Buildbot](https://dolphin.ci/) | [Forums](https://forums.dolphin-emu.org/) | [Wiki](https://wiki.dolphin-emu.org/) | [GitHub Wiki](https://github.com/dolphin-emu/dolphin/wiki) | [Issue Tracker](https://bugs.dolphin-emu.org/projects/emulator/issues) | [Coding Style](https://github.com/dolphin-emu/dolphin/blob/master/Contributing.md) | [Transifex Page](https://app.transifex.com/dolphinemu/dolphin-emu/dashboard/) | [Analytics](https://mon.dolphin-emu.org/)
