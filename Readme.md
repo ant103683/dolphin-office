@@ -60,11 +60,11 @@ The project is now divided into two versions: **Server** (Headless) and **Client
 
 ---
 
-## 🆕 Advanced Functions
+## 🆕 Netplay New Functions
 
 * **Mid-Game Remapping**: Swap player slots (e.g., 1P and 2P) or change an observer to a player **during the session** without restarting.
 * **Instant Start (Savestate Sync)**: Skip intro animations by booting directly from a savestate. 
-    * Place identical files in `Dolphin Emulation/StateSaves/initial/`.
+    * Place identical files in `Dolphin Emulator/StateSaves/initial/`, all clients needing with same save.
     * Format: `GameID_Hash.sav` (e.g., `RDSJAF_531c9777.sav`).
 * **Late-Join Support**: New players can join mid-session! The game will pause while the new player receives the current **Savestate** from the server. (Transmission speed depends on server bandwidth).
 
