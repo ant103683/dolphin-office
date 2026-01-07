@@ -110,7 +110,9 @@ struct SConfig
   // Load settings
   void LoadSettings();
 
-  // Return the permanent and somewhat globally used instance of this struct (must call Init() first)
+  static void ResetAllSettings();
+
+  // Return the permanent and somewhat globally used instance of this struct
   static SConfig& GetInstance() { return (*m_Instance); }
   // Returns nullptr if Init() has not been called yet — useful during very early startup
   static const SConfig* GetInstancePtr() { return m_Instance; }
