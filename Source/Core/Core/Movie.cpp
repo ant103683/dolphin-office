@@ -1424,7 +1424,7 @@ void MovieManager::GetSettings()
   {
     u64 title_id = SConfig::GetInstance().GetTitleID();
     m_clear_save = !File::Exists(
-        Common::GetTitleDataPath(title_id, Common::FromWhichRoot::Session) + "/banner.bin");
+        Common::GetTitleDataPathForGame(title_id, Common::FromWhichRoot::Session) + "/banner.bin");
   }
   else
   {

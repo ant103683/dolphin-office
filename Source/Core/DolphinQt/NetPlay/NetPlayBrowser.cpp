@@ -102,7 +102,11 @@ void NetPlayBrowser::CreateWidgets()
   auto* filter_layout = new QGridLayout;
   filter_box->setLayout(filter_layout);
 
-  filter_layout->addWidget(new QLabel(tr("Region:")), 0, 0);
+  auto* region_label = new QLabel(tr("Region:"));
+  region_label->setVisible(false);
+  m_region_combo->setVisible(false);
+
+  filter_layout->addWidget(region_label, 0, 0);
   filter_layout->addWidget(m_region_combo, 0, 1, 1, -1);
   filter_layout->addWidget(new QLabel(tr("Name:")), 1, 0);
   filter_layout->addWidget(m_edit_name, 1, 1, 1, -1);
@@ -218,7 +222,7 @@ void NetPlayBrowser::UpdateList()
 
   m_table_widget->clear();
   m_table_widget->setColumnCount(7);
-  m_table_widget->setHorizontalHeaderLabels({tr("Region"), tr("Name"), tr("Password?"),
+  m_table_widget->setHorizontalHeaderLabels({tr("NO."), tr("Name"), tr("Password?"),
                                              tr("In-Game?"), tr("Game"), tr("Players"),
                                              tr("Version")});
 
@@ -242,7 +246,8 @@ void NetPlayBrowser::UpdateList()
     auto* password = new QTableWidgetItem(entry.has_password ? tr("Yes") : tr("No"));
     auto* in_game = new QTableWidgetItem(entry.in_game ? tr("Yes") : tr("No"));
     auto* game_id = new QTableWidgetItem(QString::fromStdString(entry.game_id));
-    auto* player_count = new QTableWidgetItem(QStringLiteral("%1").arg(entry.player_count));
+    int display_player_count = entry.player_count > 0 ? entry.player_count - 1 : entry.player_count;
+    auto* player_count = new QTableWidgetItem(QStringLiteral("%1").arg(display_player_count));
     auto* version = new QTableWidgetItem(QString::fromStdString(entry.version));
 
     const bool enabled = Common::GetScmDescStr() == entry.version;

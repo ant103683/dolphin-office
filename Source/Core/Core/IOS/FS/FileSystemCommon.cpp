@@ -7,6 +7,7 @@
 
 #include "Common/Assert.h"
 #include "Common/FileUtil.h"
+#include "Common/IOFile.h"
 #include "Core/IOS/Device.h"
 #include "Core/IOS/FS/HostBackend/FS.h"
 
@@ -122,9 +123,30 @@ ResultCode FileSystem::CreateFullPath(Uid uid, Gid gid, const std::string& path,
     if (metadata && metadata->is_file)
       return ResultCode::Invalid;
 
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+      File::IOFile log_file(log_path, "ab");
+      if (log_file)
+      {
+        const std::string line = "[NPDEBUG] CreateFullPath: inspecting subpath='" + subpath + "'\n";
+        log_file.WriteBytes(line.data(), line.size());
+      }
+    }
     if (!metadata)
     {
       const ResultCode result = CreateDirectory(uid, gid, subpath, attribute, modes);
+
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+        File::IOFile log_file(log_path, "ab");
+        if (log_file)
+        {
+          const std::string line = fmt::format("[NPDEBUG] CreateFullPath: created subpath='{}' result={}\n",
+                                               subpath, static_cast<int>(result));
+          log_file.WriteBytes(line.data(), line.size());
+        }
+      }
+
       if (result != ResultCode::Success)
         return result;
     }

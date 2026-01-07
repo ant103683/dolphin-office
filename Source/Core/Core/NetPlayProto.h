@@ -171,6 +171,28 @@ enum class MessageID : u8
   ClientCapabilities = 0xA5,
   HostInputAuthority = 0xA6,
   PowerButton = 0xA7,
+  RequestStartGameClient = 0xA8,
+
+  // 客户端在处理完 OnChangeGame 并检查 initial state save 后的回报
+  ClientInitialStateAck = 0xA9,  // 客户端 -> 服务器
+  PauseSimulation = 0xAA,
+  ResumeSimulation = 0xAB,
+
+  // Client requests to change game by minimal identifier
+  RequestChangeGame = 0xAE,
+  RequestChangeGameFull = 0xAC,
+  // Server notifies client that requested game does not exist on server list
+  ChangeGameNotFound = 0xAF,
+
+  MidJoinAwaitNewUser = 0xAD,
+  MidJoinCancelAwait = 0xB2,
+  MidJoinRequestSaveUpload = 0xB3,
+  PauseSimulationPure = 0xB4,
+  MidJoinClientSaved = 0xB5,
+  MidJoinNewUserDecompressed = 0xB6,
+  MidJoinNewUserWindowStarted = 0xB7,
+  MidJoinNewUserLoaded = 0xB8,
+
 
   TimeBase = 0xB0,
   DesyncDetected = 0xB1,
@@ -190,6 +212,9 @@ enum class MessageID : u8
 
   SyncSaveData = 0xF1,
   SyncCodes = 0xF2,
+
+  REQUEST_PAD_MAPPING_CHANGE_ID = 0x58,
+  REQUEST_BUFFER_CHANGE_ID = 0x59,
 };
 
 enum class ConnectionError : u8
@@ -209,7 +234,9 @@ enum class SyncSaveDataID : u8
   RawData = 3,
   GCIData = 4,
   WiiData = 5,
-  GBAData = 6
+  GBAData = 6,
+  UploadIntent = 7,
+  AllowUpload = 8
 };
 
 enum class SyncCodeID : u8

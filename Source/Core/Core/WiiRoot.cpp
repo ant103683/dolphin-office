@@ -89,7 +89,7 @@ static void RestoreFile(const std::string& path_in_nand)
 
 static void CopySave(FS::FileSystem* source, FS::FileSystem* dest, const u64 title_id)
 {
-  dest->CreateFullPath(IOS::PID_KERNEL, IOS::PID_KERNEL, Common::GetTitleDataPath(title_id) + '/',
+  dest->CreateFullPath(IOS::PID_KERNEL, IOS::PID_KERNEL, Common::GetTitleDataPathForGame(title_id) + '/',
                        0, {FS::Mode::ReadWrite, FS::Mode::ReadWrite, FS::Mode::ReadWrite});
   const auto source_save = WiiSave::MakeNandStorage(source, title_id);
   const auto dest_save = WiiSave::MakeNandStorage(dest, title_id);
@@ -140,7 +140,7 @@ static void InitializeDeterministicWiiSaves(FS::FileSystem* session_fs,
     else
     {
       // TODO: Check for the actual save data
-      const std::string path = Common::GetTitleDataPath(title_id) + "/banner.bin";
+      const std::string path = Common::GetTitleDataPathForGame(title_id) + "/banner.bin";
       movie.SetClearSave(!configured_fs->GetMetadata(IOS::PID_KERNEL, IOS::PID_KERNEL, path));
     }
   }
@@ -343,7 +343,7 @@ void InitializeWiiFileSystemContents(
   if (save_redirect)
   {
     const u64 title_id = SConfig::GetInstance().GetTitleID();
-    std::string source_path = Common::GetTitleDataPath(title_id);
+    std::string source_path = Common::GetTitleDataPathForGame(title_id);
 
     if (is_temp_nand)
     {
@@ -425,7 +425,7 @@ void CleanUpWiiFileSystemContents(const BootSessionData& boot_session_data)
     const auto session_save = WiiSave::MakeNandStorage(ios->GetFS().get(), title_id);
 
     // FS won't write the save if the directory doesn't exist
-    const std::string title_path = Common::GetTitleDataPath(title_id);
+    const std::string title_path = Common::GetTitleDataPathForGame(title_id);
     configured_fs->CreateFullPath(IOS::PID_KERNEL, IOS::PID_KERNEL, title_path + '/', 0,
                                   {FS::Mode::ReadWrite, FS::Mode::ReadWrite, FS::Mode::ReadWrite});
 

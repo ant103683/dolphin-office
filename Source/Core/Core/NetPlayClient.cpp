@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "Core/NetPlayClient.h"
+#include "Core/NetPlayProto.h" // For REQUEST_PAD_MAPPING_CHANGE_ID and NetPlay::Packet etc.
+
 
 #include <algorithm>
 #include <array>
@@ -43,13 +45,18 @@
 #include "Core/Config/SessionSettings.h"
 #include "Core/Config/WiimoteSettings.h"
 #include "Core/ConfigManager.h"
+#include "Core/Core.h"
 #include "Core/GeckoCode.h"
+#include "Core/State.h"
+#include "Core/System.h"
+
 #include "Core/HW/EXI/EXI.h"
 #include "Core/HW/EXI/EXI_DeviceIPL.h"
 #ifdef HAS_LIBMGBA
 #include "Core/HW/GBACore.h"
 #endif
 #include "Core/HW/GBAPad.h"
+#include "Core/NetPlayUpload.h"
 #include "Core/HW/GCMemcard/GCMemcard.h"
 #include "Core/HW/GCPad.h"
 #include "Core/HW/SI/SI.h"
@@ -63,14 +70,18 @@
 #include "Core/HW/WiimoteReal/WiimoteReal.h"
 #include "Core/IOS/FS/FileSystem.h"
 #include "Core/IOS/FS/HostBackend/FS.h"
+#include "Core/IOS/ES/ES.h"
 #include "Core/IOS/USB/Bluetooth/BTEmu.h"
 #include "Core/IOS/Uids.h"
 #include "Core/Movie.h"
 #include "Core/NetPlayCommon.h"
+#include "Core/NetplayManager.h"
 #include "Core/PowerPC/PowerPC.h"
 #include "Core/SyncIdentifier.h"
 #include "Core/System.h"
 #include "DiscIO/Blob.h"
+#include "DiscIO/Enums.h"
+#include "DiscIO/Volume.h"
 
 #include "InputCommon/ControllerEmu/ControlGroup/Attachments.h"
 #include "InputCommon/GCAdapter.h"
@@ -78,6 +89,9 @@
 #include "UICommon/GameFile.h"
 #include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/VideoConfig.h"
+#include "VideoCommon/VideoEvents.h"
+
+#include "Core/TitleDatabase.h"
 
 namespace NetPlay
 {
@@ -378,6 +392,14 @@ void NetPlayClient::OnData(sf::Packet& packet)
     OnChunkedDataAbort(packet);
     break;
 
+  case MessageID::ChangeGameNotFound:
+  {
+    std::string game_id;
+    packet >> game_id;
+    m_dialog->AppendChat(Common::GetStringT("Server does not have requested game: ") + game_id);
+    break;
+  }
+
   case MessageID::PadMapping:
     OnPadMapping(packet);
     break;
@@ -388,6 +410,66 @@ void NetPlayClient::OnData(sf::Packet& packet)
 
   case MessageID::WiimoteMapping:
     OnWiimoteMapping(packet);
+    break;
+
+  case MessageID::PauseSimulation:
+    Core::QueueHostJob([this](Core::System& system) { 
+      Core::SetState(system, Core::State::Paused); 
+      
+      // 尝试加载初始状态存档
+#if IS_CLIENT
+      const std::string game_id = m_selected_game.game_id;
+      const std::string full_hash = Common::SHA1::DigestToString(m_selected_game.sync_hash);
+      const std::string hash8 = full_hash.substr(0, 8);
+      
+      if (NetPlay::NetplayManager::GetInstance().LoadInitialState(system, game_id, hash8))
+      {
+        INFO_LOG_FMT(NETPLAY, "Successfully loaded initial state for game {} ({})", game_id, hash8);
+      }
+      else
+      {
+        INFO_LOG_FMT(NETPLAY, "No initial state found for game {} ({})", game_id, hash8);
+      }
+#endif
+    });
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+      File::IOFile log_file(log_path, "ab");
+      if (log_file)
+      {
+        const std::string& r = fmt::format("client received pause command\n");
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+    }
+    break;
+  
+  case MessageID::PauseSimulationPure:
+    Core::QueueHostJob([this](Core::System& system) {
+      Core::SetState(system, Core::State::Paused);
+      const std::string upload_dir = File::GetUserPath(D_STATESAVES_IDX) + "upload" DIR_SEP;
+      if (File::Exists(upload_dir))
+        File::DeleteDirRecursively(upload_dir);
+      File::CreateFullPath(upload_dir);
+      const std::string upload_path = upload_dir + "upload.sav";
+      ::State::SaveAs(system, upload_path, true);
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+        File::IOFile log_file(log_path, "ab");
+        if (log_file)
+        {
+          const std::string& r = fmt::format("client saved upload.sav and sent MidJoinClientSaved\n");
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+      }
+      sf::Packet saved_packet;
+      saved_packet << MessageID::MidJoinClientSaved;
+      Send(saved_packet);
+    });
+    break;
+
+  case MessageID::ResumeSimulation:
+    Core::QueueHostJob([](Core::System& system) { Core::SetState(system, Core::State::Running); });
+    m_dialog->OnResumeSimulation();
     break;
 
   case MessageID::PadData:
@@ -479,6 +561,10 @@ void NetPlayClient::OnData(sf::Packet& packet)
     OnGameDigestAbort();
     break;
 
+  case MessageID::MidJoinRequestSaveUpload:
+    OnMidJoinRequestSaveUpload(packet);
+    break;
+
   default:
     PanicAlertFmtT("Unknown message received with id : {0}", static_cast<u8>(mid));
     break;
@@ -550,7 +636,7 @@ void NetPlayClient::OnChunkedDataStart(sf::Packet& packet)
 
   INFO_LOG_FMT(NETPLAY, "Starting data chunk {}.", cid);
 
-  m_chunked_data_receive_queue.emplace(cid, sf::Packet{});
+  m_chunked_data_receive_queue.emplace(cid, ChunkedDataInfo{sf::Packet{}, title});
 
   std::vector<int> players;
   players.push_back(m_local_player->pid);
@@ -571,8 +657,38 @@ void NetPlayClient::OnChunkedDataEnd(sf::Packet& packet)
 
   INFO_LOG_FMT(NETPLAY, "Ending data chunk {}.", cid);
 
-  auto& data_packet = data_packet_iter->second;
-  OnData(data_packet);
+  auto& info = data_packet_iter->second;
+
+  if (info.title == "Mid-Join Save")
+  {
+    const std::string mid_add_dir = File::GetUserPath(D_STATESAVES_IDX) + "midAdd" DIR_SEP;
+    if (File::Exists(mid_add_dir))
+      File::DeleteDirRecursively(mid_add_dir);
+    File::CreateFullPath(mid_add_dir);
+
+    const std::string temp_save_path = mid_add_dir + "temp.sav";
+
+    if (NetPlay::DecompressPacketIntoFile(info.packet, temp_save_path))
+    {
+      INFO_LOG_FMT(NETPLAY, "MidJoin save decompressed to {}.", temp_save_path);
+
+      m_is_mid_joining = true;
+
+      sf::Packet dec_packet;
+      dec_packet << MessageID::MidJoinNewUserDecompressed;
+      Send(dec_packet);
+      INFO_LOG_FMT(NETPLAY, "Sent MidJoinNewUserDecompressed.");
+    }
+    else
+    {
+      ERROR_LOG_FMT(NETPLAY, "Failed to decompress MidJoin save.");
+    }
+  }
+  else
+  {
+    OnData(info.packet);
+  }
+  
   m_chunked_data_receive_queue.erase(data_packet_iter);
   m_dialog->HideChunkedProgressDialog();
 
@@ -594,7 +710,7 @@ void NetPlayClient::OnChunkedDataPayload(sf::Packet& packet)
     return;
   }
 
-  auto& data_packet = data_packet_iter->second;
+  auto& data_packet = data_packet_iter->second.packet;
   while (!packet.endOfPacket())
   {
     u8 byte;
@@ -811,6 +927,9 @@ void NetPlayClient::OnChangeGame(sf::Packet& packet)
     ReceiveSyncIdentifier(packet, m_selected_game);
     packet >> netplay_name;
   }
+#if IS_CLIENT
+  m_has_pending_initial_state_ack = checkHasInitialStateSave();
+#endif
 
   INFO_LOG_FMT(NETPLAY, "Game changed to {}", netplay_name);
 
@@ -841,6 +960,11 @@ void NetPlayClient::OnGameStatus(sf::Packet& packet)
 
 void NetPlayClient::OnStartGame(sf::Packet& packet)
 {
+#if IS_CLIENT
+  if (!m_has_pending_initial_state_ack)
+     m_has_pending_initial_state_ack = checkHasInitialStateSave();
+#endif
+
   {
     std::lock_guard lkg(m_crit.game);
 
@@ -941,7 +1065,99 @@ void NetPlayClient::OnStartGame(sf::Packet& packet)
     m_net_settings.is_hosting = m_local_player->IsHost();
   }
 
+#if IS_CLIENT
+  if (m_is_mid_joining && !m_mid_join_after_present_hook)
+  {
+    m_mid_join_after_present_count = 0;
+    m_mid_join_loading_invoked = false;
+    m_mid_join_first_present_ready_sent = false;
+    m_mid_join_after_present_hook = AfterPresentEvent::Register(
+        [this](PresentInfo& info) {
+          m_mid_join_after_present_count++;
+          if (!m_mid_join_first_present_ready_sent && m_mid_join_after_present_count >= 1)
+          {
+            sf::Packet win_packet;
+            win_packet << MessageID::MidJoinNewUserWindowStarted;
+            {
+              const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+              File::IOFile log_file(log_path, "ab");
+              if (log_file)
+              {
+                const std::string& r = fmt::format("client enqueue MidJoinNewUserWindowStarted\n");
+                log_file.WriteBytes(r.c_str(), r.size());
+              }
+            }
+            SendAsync(std::move(win_packet));
+            m_mid_join_first_present_ready_sent = true;
+            {
+              const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+              File::IOFile log_file(log_path, "ab");
+              if (log_file)
+              {
+                const std::string& r = fmt::format("client window started, sent MidJoinNewUserWindowStarted\n");
+                log_file.WriteBytes(r.c_str(), r.size());
+              }
+            }
+          }
+          if (m_mid_join_loading_invoked)
+            return;
+          if (m_mid_join_after_present_count < 2)
+            return;
+          Core::QueueHostJob([this](Core::System& system) {
+            Core::SetState(system, Core::State::Paused);
+            const std::string mid_add_dir = File::GetUserPath(D_STATESAVES_IDX) + "midAdd" DIR_SEP;
+            const std::string temp_save_path = mid_add_dir + "temp.sav";
+            ::State::LoadAs(system, temp_save_path);
+            {
+              const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+              File::IOFile log_file(log_path, "ab");
+              if (log_file)
+              {
+                const std::string& r = fmt::format("client loaded temp.sav, sent MidJoinNewUserLoaded\n");
+                log_file.WriteBytes(r.c_str(), r.size());
+              }
+            }
+            sf::Packet load_packet;
+            load_packet << MessageID::MidJoinNewUserLoaded;
+            {
+              const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+              File::IOFile log_file(log_path, "ab");
+              if (log_file)
+              {
+                const std::string& r = fmt::format("client enqueue MidJoinNewUserLoaded\n");
+                log_file.WriteBytes(r.c_str(), r.size());
+              }
+            }
+            SendAsync(std::move(load_packet));
+          });
+          m_mid_join_loading_invoked = true;
+          m_mid_join_after_present_hook.reset();
+          m_is_mid_joining = false;
+        },
+        "NetPlayMidJoinAfterFirstPresent");
+  }
+#endif
+
   m_dialog->OnMsgStartGame();
+
+#if IS_CLIENT
+  if (m_is_mid_joining)
+  {
+    sf::Packet win_packet2;
+    win_packet2 << MessageID::MidJoinNewUserWindowStarted;
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+      File::IOFile log_file(log_path, "ab");
+      if (log_file)
+      {
+        const std::string& r = fmt::format("client immediate MidJoinNewUserWindowStarted\n");
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+    }
+    SendAsync(std::move(win_packet2));
+    m_mid_join_first_present_ready_sent = true;
+  }
+#endif
 }
 
 void NetPlayClient::OnStopGame(sf::Packet& packet)
@@ -1036,6 +1252,56 @@ void NetPlayClient::OnSyncSaveData(sf::Packet& packet)
   case SyncSaveDataID::GBAData:
     OnSyncSaveDataGBA(packet);
     break;
+
+  case SyncSaveDataID::Success:
+    break;
+
+  case SyncSaveDataID::Failure:
+    break;
+
+  case SyncSaveDataID::AllowUpload:
+  {
+    auto* ios = Core::System::GetInstance().GetIOS();
+    IOS::HLE::FS::FileSystem* fs_for_upload = m_wii_sync_fs ? m_wii_sync_fs.get() : ios->GetFS().get();
+
+    std::vector<u64> titles_for_upload = m_wii_sync_titles;
+    if (titles_for_upload.empty())
+    {
+      titles_for_upload = ios->GetESCore().GetInstalledTitles();
+      if (m_dialog)
+      {
+        m_dialog->AppendChat(Common::FmtFormatT("允许上传：未检测到同步标题，改用会话FS枚举，共{0}项", titles_for_upload.size()));
+      }
+    }
+
+    std::string redirect_path_for_upload = m_wii_sync_redirect_folder;
+    if (redirect_path_for_upload.empty())
+    {
+      redirect_path_for_upload = File::GetUserPath(D_USER_IDX) + "RedirectSession" DIR_SEP;
+      const bool redirect_exists = File::IsDirectory(redirect_path_for_upload);
+      if (m_dialog)
+      {
+        m_dialog->AppendChat(Common::FmtFormatT("重定向目录回退：{0} {1}", redirect_path_for_upload,
+                                               redirect_exists ? "存在" : "不存在"));
+      }
+    }
+
+    sf::Packet upload;
+    const bool ok = NetPlayUpload::BuildClientWiiSaveUploadPacket(
+        fs_for_upload, titles_for_upload, redirect_path_for_upload, upload);
+    if (ok)
+    {
+      SendAsync(std::move(upload));
+    }
+    else
+    {
+      sf::Packet resp;
+      resp << MessageID::SyncSaveData;
+      resp << SyncSaveDataID::Failure;
+      SendAsync(std::move(resp));
+    }
+  }
+  break;
 
   default:
     PanicAlertFmtT("Unknown SYNC_SAVE_DATA message received with id: {0}", static_cast<u8>(sub_id));
@@ -1191,7 +1457,7 @@ void NetPlayClient::OnSyncSaveDataWii(sf::Packet& packet)
     u64 title_id = Common::PacketReadU64(packet);
     titles.push_back(title_id);
     temp_fs->CreateFullPath(IOS::PID_KERNEL, IOS::PID_KERNEL,
-                            Common::GetTitleDataPath(title_id) + '/', 0, fs_modes);
+                            Common::GetTitleDataPathForGame(title_id) + '/', 0, fs_modes);
     auto save = WiiSave::MakeNandStorage(temp_fs.get(), title_id);
 
     bool exists;
@@ -1739,6 +2005,14 @@ void NetPlayClient::SendStopGamePacket()
   sf::Packet packet;
   packet << MessageID::StopGame;
 
+  SendAsync(std::move(packet));
+}
+
+void NetPlayClient::RequestWiiSaveUpload()
+{
+  sf::Packet packet;
+  packet << MessageID::SyncSaveData;
+  packet << SyncSaveDataID::UploadIntent;
   SendAsync(std::move(packet));
 }
 
@@ -2764,6 +3038,150 @@ void NetPlay_Disable()
   std::lock_guard lk(crit_netplay_client);
   netplay_client = nullptr;
 }
+
+void NetPlayClient::RequestPadMappingChange(const PadMappingArray& gc_map,
+                                            const GBAConfigArray& gba_cfg,
+                                            const PadMappingArray& wii_map)
+{
+  if (!IsConnected())
+  {
+    WARN_LOG_FMT(NETPLAY, "Not connected, cannot send pad mapping change request.");
+    return;
+  }
+
+  sf::Packet packet;
+  // Ensure NetPlay::MessageID::REQUEST_PAD_MAPPING_CHANGE_ID is defined and accessible.
+  packet << static_cast<u8>(NetPlay::MessageID::REQUEST_PAD_MAPPING_CHANGE_ID);
+
+  // Manually serialize PadMappingArray (gc_map)
+  for (const PlayerId& mapping : gc_map)
+  {
+    packet << mapping;
+  }
+
+  // Manually serialize GBAConfigArray (gba_cfg)
+  for (const GBAConfig& config : gba_cfg)
+  {
+    packet << config.enabled;
+    packet << config.has_rom;
+    packet << config.title; // sf::Packet supports std::string
+    for (const u8& hash_byte : config.hash) // GBAConfig::hash is std::array<u8, 20>
+    {
+      packet << hash_byte;
+    }
+  }
+
+  // Manually serialize PadMappingArray (wii_map)
+  for (const PlayerId& mapping : wii_map)
+  {
+    packet << mapping;
+  }
+
+  // Send the packet using the class's SendAsync method
+  SendAsync(std::move(packet)); 
+  INFO_LOG_FMT(NETPLAY, "Sent pad mapping change request to server.");
+}
+
+void NetPlayClient::RequestBufferChange(int new_buffer_value)
+{
+  if (!m_server || !m_server->host)
+    return;
+
+  sf::Packet packet;
+  // The message ID should be NetPlay::MessageID::REQUEST_BUFFER_CHANGE_ID
+  // Ensure NetPlay::MessageID is accessible here or use the correct scope/enum.
+  // Assuming MessageID is an enum class defined in NetPlay namespace or globally accessible
+  packet << static_cast<u8>(NetPlay::MessageID::REQUEST_BUFFER_CHANGE_ID); // Corrected: Cast to u8
+  packet << static_cast<s32>(new_buffer_value);
+  Send(packet); // Assuming Send is a member function that takes sf::Packet by const reference or value
+  INFO_LOG_FMT(NETPLAY, "Sent buffer change request to server: new_buffer_value = {}", new_buffer_value); // Corrected: Use {} for fmt
+}
+
+void NetPlayClient::RequestChangeGameFull(const UICommon::GameFile& game)
+{
+  if (!IsConnected())
+  {
+    WARN_LOG_FMT(NETPLAY, "Not connected, cannot send full change game request.");
+    return;
+  }
+
+  sf::Packet packet;
+  packet << MessageID::RequestChangeGameFull;
+
+  // Serialize core game info
+  packet << game.GetGameID();
+  std::array<u8, 20> sync_hash = game.GetSyncHash();
+  for (const u8& b : sync_hash)
+    packet << b;
+  packet << game.GetNetPlayName(Core::TitleDatabase{});
+  auto sync_id = game.GetSyncIdentifier();
+  packet << static_cast<u64>(sync_id.dol_elf_size);
+  packet << static_cast<u16>(sync_id.revision);
+  packet << static_cast<u8>(sync_id.disc_number);
+  packet << sync_id.is_datel;
+  packet << static_cast<u32>(game.GetRegion());
+  packet << static_cast<u32>(game.GetPlatform());
+
+  // Serialize Wii-specific data
+  bool has_wii_data = false;
+  std::vector<u8> tmd_bytes;
+  std::vector<u8> ticket_bytes;
+  std::vector<u8> cert_bytes;
+  if (game.GetPlatform() == DiscIO::Platform::WiiDisc || game.GetPlatform() == DiscIO::Platform::WiiWAD)
+  {
+    auto vol = DiscIO::CreateVolume(game.GetFilePath());
+    if (vol)
+    {
+      const auto part = vol->GetGamePartition();
+      const auto tmd = vol->GetTMD(part);
+      const auto ticket = vol->GetTicket(part);
+      const auto cert_chain = vol->GetCertificateChain(part);
+      if (tmd.IsValid())
+        tmd_bytes = tmd.GetBytes();
+      if (ticket.IsValid())
+        ticket_bytes = ticket.GetBytes();
+      cert_bytes = cert_chain;
+      has_wii_data = true;
+    }
+  }
+  packet << has_wii_data;
+  if (has_wii_data)
+  {
+    packet << static_cast<u32>(tmd_bytes.size());
+    for (auto b : tmd_bytes)
+      packet << b;
+    packet << static_cast<u32>(ticket_bytes.size());
+    for (auto b : ticket_bytes)
+      packet << b;
+    packet << static_cast<u32>(cert_bytes.size());
+    for (auto b : cert_bytes)
+      packet << b;
+  }
+
+  Send(packet);
+  INFO_LOG_FMT(NETPLAY, "Requested change game full: {} (hash={})", game.GetGameID(),
+               Common::SHA1::DigestToString(sync_hash));
+}
+
+void NetPlayClient::RequestChangeGameIdHash(const std::string& game_id,
+                                            const std::array<u8, 20>& sync_hash)
+{
+  if (!IsConnected())
+  {
+    WARN_LOG_FMT(NETPLAY, "Not connected, cannot send change game request.");
+    return;
+  }
+
+  sf::Packet packet;
+  packet << MessageID::RequestChangeGame;
+  packet << game_id;
+  for (const u8& b : sync_hash)
+    packet << b;
+  Send(packet);
+  INFO_LOG_FMT(NETPLAY, "Requested change game: {} (hash={})", game_id,
+               Common::SHA1::DigestToString(sync_hash));
+}
+
 }  // namespace NetPlay
 
 // stuff hacked into dolphin
@@ -2851,4 +3269,118 @@ int SerialInterface::CSIDevice_GCController::NetPlay_InGamePadToLocalPad(int num
     return NetPlay::netplay_client->InGamePadToLocalPad(numPAD);
 
   return numPAD;
+}
+
+namespace NetPlay
+{
+// called from ---GUI--- thread
+void NetPlayClient::TrySendInitialStateAck()
+{
+  if (!m_has_pending_initial_state_ack)
+    return;
+
+  const bool initial_state_available = m_has_pending_initial_state_ack;
+  m_has_pending_initial_state_ack = false;
+
+  // 向服务器发送客户端是否存在 initial state save 的确认消息
+  sf::Packet ack_packet;
+  ack_packet << MessageID::ClientInitialStateAck;
+  ack_packet << initial_state_available;
+  Send(ack_packet);
+
+  INFO_LOG_FMT(NETPLAY, "Sent initial state acknowledgement: {}.", initial_state_available);
+}
+
+void NetPlayClient::SendChunked(sf::Packet&& packet, const std::string& title)
+{
+  std::thread([this, p = std::move(packet), title]() mutable {
+    Common::SetCurrentThreadName("NetPlay Chunked Sender");
+    u32 cid = 0;
+    // Simple random CID generation to avoid collision (though unlikely with one uploader)
+    cid = static_cast<u32>(std::chrono::steady_clock::now().time_since_epoch().count());
+
+    const u64 total_size = p.getDataSize();
+    
+    sf::Packet start_pkg;
+    start_pkg << MessageID::ChunkedDataStart << cid << title;
+    start_pkg << total_size;
+    SendAsync(std::move(start_pkg), CHUNKED_DATA_CHANNEL);
+    
+    size_t offset = 0;
+    while (offset < total_size && IsConnected())
+    {
+      size_t chunk_size = std::min(CHUNKED_DATA_UNIT_SIZE, total_size - offset);
+      sf::Packet payload_pkg;
+      payload_pkg << MessageID::ChunkedDataPayload << cid;
+      payload_pkg.append(static_cast<const u8*>(p.getData()) + offset, chunk_size);
+      SendAsync(std::move(payload_pkg), CHUNKED_DATA_CHANNEL);
+      offset += chunk_size;
+      
+      // Basic rate limiting could go here if needed
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    
+    if (IsConnected())
+    {
+        sf::Packet end_pkg;
+        end_pkg << MessageID::ChunkedDataEnd << cid;
+        SendAsync(std::move(end_pkg), CHUNKED_DATA_CHANNEL);
+    }
+  }).detach();
+}
+
+void NetPlayClient::OnMidJoinRequestSaveUpload(sf::Packet& packet)
+{
+  INFO_LOG_FMT(NETPLAY, "Received MidJoinRequestSaveUpload.");
+
+  Core::QueueHostJob([this](Core::System& system) {
+      const std::string upload_dir = File::GetUserPath(D_STATESAVES_IDX) + "upload" DIR_SEP;
+
+      if (File::Exists(upload_dir))
+      {
+          File::DeleteDirRecursively(upload_dir);
+      }
+      File::CreateFullPath(upload_dir);
+
+      const std::string upload_path = upload_dir + "upload.sav";
+
+      INFO_LOG_FMT(NETPLAY, "Saving mid-join state to {}", upload_path);
+
+      ::State::SaveAs(system, upload_path, true);
+      if (File::Exists(upload_path))
+      {
+          INFO_LOG_FMT(NETPLAY, "MidJoin save created successfully. Compressing and sending...");
+
+          std::thread([this, upload_path]() {
+              Common::SetCurrentThreadName("NetPlay MidJoin Compressor");
+              sf::Packet compressed_packet;
+              if (NetPlay::CompressFileIntoPacket(upload_path, compressed_packet))
+              {
+                  INFO_LOG_FMT(NETPLAY, "Compression successful (size: {} bytes). Sending...", compressed_packet.getDataSize());
+                  SendChunked(std::move(compressed_packet), "Mid-Join Save");
+              }
+              else
+              {
+                  ERROR_LOG_FMT(NETPLAY, "Failed to compress MidJoin save file.");
+              }
+          }).detach();
+      }
+      else
+      {
+          ERROR_LOG_FMT(NETPLAY, "Failed to save MidJoin state.");
+      }
+  });
+}
+
+bool NetPlayClient::checkHasInitialStateSave()
+{
+  bool has_initial_state = false;
+#if IS_CLIENT
+  const std::string game_id = m_selected_game.game_id;
+  const std::string full_hash = Common::SHA1::DigestToString(m_selected_game.sync_hash);
+  const std::string hash8 = full_hash.substr(0, 8);
+  has_initial_state = NetPlay::NetplayManager::GetInstance().HasInitialStateSave(game_id, hash8);
+#endif
+  return has_initial_state;
+}
 }

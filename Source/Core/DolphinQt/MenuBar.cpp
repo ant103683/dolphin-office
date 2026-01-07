@@ -18,12 +18,15 @@
 #include <QUrl>
 
 #include <fmt/format.h>
+#include <optional>
+#include <algorithm>
 
 #include "Common/Align.h"
 #include "Common/CommonPaths.h"
 #include "Common/FileUtil.h"
 #include "Common/IOFile.h"
 #include "Common/StringUtil.h"
+#include "Common/NandPaths.h"
 
 #include "Core/AchievementManager.h"
 #include "Core/CommonTitles.h"
@@ -71,6 +74,8 @@
 
 #include "UICommon/AutoUpdate.h"
 #include "UICommon/GameFile.h"
+#include "Common/Logging/Log.h"
+#include "DolphinQt/SelectHashDialog.h"
 
 #ifdef RC_CLIENT_SUPPORTS_RAINTEGRATION
 #include <rcheevos/include/rc_client_raintegration.h>
@@ -1208,6 +1213,36 @@ void MenuBar::ImportWiiSave()
   if (file.isEmpty())
     return;
 
+  // Obtain TitleID from the selected save file
+  std::optional<u64> title_id = WiiSave::GetTitleIDFromDataBin(file.toStdString());
+  if (!title_id)
+  {
+    ModalMessageBox::critical(this, tr("Save Import"),
+                              tr("Failed to import save file. Could not read Title ID from the save file."));
+    return;
+  }
+
+  // Query all existing hash8 directories for this Title ID in the NAND
+  std::vector<std::string> hash8_dirs =
+      Common::GetAllHash8ForTitle(*title_id, Common::FromWhichRoot::Configured);
+
+  std::string selected_hash;
+  if (hash8_dirs.size() > 1)
+  {
+    DolphinQt::SelectHashDialog dlg(hash8_dirs, this);
+    if (dlg.exec() != QDialog::Accepted)
+      return;  // User cancelled
+
+    selected_hash = dlg.GetSelectedHash().toStdString();
+  }
+  else if (hash8_dirs.size() == 1)
+  {
+    selected_hash = hash8_dirs.front();
+  }
+
+  // Feed the selected hash (may be empty) into the core layer via SConfig
+  SConfig::GetInstance().SetSaveHash8(selected_hash);
+
   auto can_overwrite = [&] {
     return ModalMessageBox::question(
                this, tr("Save Import"),
@@ -1217,6 +1252,9 @@ void MenuBar::ImportWiiSave()
   };
 
   const auto result = WiiSave::Import(file.toStdString(), can_overwrite);
+
+  // Clear SaveHash8 afterwards
+  SConfig::GetInstance().SetSaveHash8("");
   switch (result)
   {
   case WiiSave::CopyResult::Success:

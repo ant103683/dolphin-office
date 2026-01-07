@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "Core/NetPlayServer.h"
+#include "UICommon/GameListExporter.h"
 
 #include <algorithm>
 #include <chrono>
@@ -24,11 +25,14 @@
 #include "Common/CommonPaths.h"
 #include "Common/ENet.h"
 #include "Common/FileUtil.h"
+#include "Common/IOFile.h"
+#include "Common/JsonUtil.h"
 #include "Common/HttpRequest.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
 #include "Common/SFMLHelper.h"
 #include "Common/StringUtil.h"
+#include "Common/Crypto/SHA1.h"
 #include "Common/UPnP.h"
 #include "Common/Version.h"
 
@@ -46,6 +50,12 @@
 #include "Core/GeckoCodeConfig.h"
 #include "Core/HW/EXI/EXI.h"
 #include "Core/HW/EXI/EXI_Device.h"
+#include "Core/Core.h"
+#include "Core/System.h"
+#include "Core/IOS/FS/FileSystem.h"
+#include "Core/IOS/FS/HostBackend/FS.h"
+#include "Core/NetPlayUpload.h"
+#include "NetplayManager.h"
 #ifdef HAS_LIBMGBA
 #include "Core/HW/GBACore.h"
 #endif
@@ -64,6 +74,7 @@
 #include "Core/IOS/Uids.h"
 #include "Core/NetPlayClient.h"  //for NetPlayUI
 #include "Core/NetPlayCommon.h"
+#include "Core/NetplayManager.h"
 #include "Core/SyncIdentifier.h"
 
 #include "DiscIO/Enums.h"
@@ -127,6 +138,7 @@ NetPlayServer::NetPlayServer(const u16 port, const bool forward_port, NetPlayUI*
                              const NetTraversalConfig& traversal_config)
     : m_dialog(dialog)
 {
+  NetPlay::NetplayManager::GetInstance();
   //--use server time
   if (enet_initialize() != 0)
   {
@@ -319,6 +331,22 @@ void NetPlayServer::ThreadFunc()
 
         sf::Packet rpac;
         rpac.append(netEvent.packet->data, netEvent.packet->dataLength);
+        {
+          int mid_hex = (netEvent.packet->dataLength >= 1)
+                            ? static_cast<int>(reinterpret_cast<const u8*>(netEvent.packet->data)[0])
+                            : -1;
+          if (mid_hex == static_cast<int>(MessageID::MidJoinNewUserWindowStarted))
+          {
+            const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+            File::IOFile log_file(log_path, "ab");
+            if (log_file)
+            {
+              const std::string& r = fmt::format("server receive event: channel={}, msg=0xb7\n",
+                                                 static_cast<int>(netEvent.channelID));
+              log_file.WriteBytes(r.c_str(), r.size());
+            }
+          }
+        }
 
         if (!netEvent.peer->data)
         {
@@ -445,8 +473,15 @@ ConnectionError NetPlayServer::OnConnect(ENetPeer* incoming_connection, sf::Pack
   if (netplay_version != Common::GetScmRevGitStr())
     return ConnectionError::VersionMismatch;
 
-  if (m_is_running || m_start_pending)
+  if ((m_is_running || m_start_pending) && !m_midjoin_waiting)
     return ConnectionError::GameRunning;
+  
+  // MidJoin: If we are waiting for a new user, and game is running, trigger upload
+  if (m_midjoin_waiting && (m_is_running || m_start_pending))
+  {
+      INFO_LOG_FMT(NETPLAY, "New player joined during wait (MidJoin).");
+      // We will handle the upload trigger after assigning PID.
+  }
 
   if (m_players.size() >= 255)
     return ConnectionError::ServerFull;
@@ -507,16 +542,73 @@ ConnectionError NetPlayServer::OnConnect(ENetPeer* incoming_connection, sf::Pack
   {
     std::lock_guard lkp(m_crit.players);
     // add new player to list of players
-    m_players.emplace(*PeerPlayerId(new_player.socket), std::move(new_player));
-    // sync pad mappings with everyone
+  m_players.emplace(*PeerPlayerId(new_player.socket), std::move(new_player));
+  NetPlay::NetplayManager::GetInstance().activeClientWithPid(new_player.pid);
+  // sync pad mappings with everyone
     UpdatePadMapping();
     UpdateGBAConfig();
     UpdateWiimoteMapping();
   }
 
+  // MidJoin: Trigger upload from host
+  if (m_midjoin_waiting && (m_is_running || m_start_pending))
+  {
+      m_midjoin_pending_pid = new_player.pid;
+      INFO_LOG_FMT(NETPLAY, "Triggering MidJoin upload for new player {}.", m_midjoin_pending_pid);
+      TryTriggerMidJoinUpload();
+  }
+  
   return ConnectionError::NoError;
 }
 
+PlayerId NetPlayServer::SelectUploader()
+{
+  std::lock_guard lkp(m_crit.players);
+  
+  // Prioritize PID=2
+  if (m_players.count(2) && m_midjoin_pending_pid != 2)
+    return 2;
+
+  // Fallback to first non-host player
+  for (const auto& [pid, client] : m_players)
+  {
+    if (pid != 1 && pid != m_midjoin_pending_pid)
+      return pid;
+  }
+
+  // Fallback to host if only player
+  return 1;
+}
+
+void NetPlayServer::TryTriggerMidJoinUpload()
+{
+  if (!m_midjoin_waiting)
+    return;
+  if (m_midjoin_upload_sent)
+    return;
+  if (m_midjoin_pending_pid == 0)
+    return;
+  if (!m_midjoin_all_clients_saved)
+    return;
+
+  PlayerId uploader = SelectUploader();
+  INFO_LOG_FMT(NETPLAY, "Selected uploader for MidJoin: {}", uploader);
+
+  sf::Packet req;
+  req << MessageID::MidJoinRequestSaveUpload;
+  SendAsync(std::move(req), uploader);
+
+  m_midjoin_upload_sent = true;
+  {
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+    File::IOFile log_file(log_path, "ab");
+    if (log_file)
+    {
+      const std::string& r = fmt::format("server requested uploader {}, all saved complete\n", int(uploader));
+      log_file.WriteBytes(r.c_str(), r.size());
+    }
+  }
+}
 // called from ---NETPLAY--- thread
 unsigned int NetPlayServer::OnDisconnect(const Client& player)
 {
@@ -557,6 +649,12 @@ unsigned int NetPlayServer::OnDisconnect(const Client& player)
   auto it = m_players.find(player.pid);
   if (it != m_players.end())
     m_players.erase(it);
+
+  NetPlay::NetplayManager::GetInstance().deactiveClientWithPid(pid);
+  if (m_players.size() <= 1)
+  {
+    NetPlay::NetplayManager::GetInstance().resetClientsExceptHost_NoLock();
+  }
 
   // alert other players of disconnect
   SendToClients(spac);
@@ -750,6 +848,37 @@ void NetPlayServer::SendChunkedToClients(sf::Packet&& packet, const PlayerId ski
   m_chunked_data_event.Set();
 }
 
+void NetPlayServer::SendPauseCommand()
+{
+  sf::Packet spac;
+  spac << MessageID::PauseSimulation;
+  SendToClients(spac);
+}
+
+void NetPlayServer::SendPurePauseCommand()
+{
+  sf::Packet spac;
+  spac << MessageID::PauseSimulationPure;
+  SendToClients(spac);
+}
+
+void NetPlayServer::SendResumeCommand()
+{
+  sf::Packet spac;
+  spac << MessageID::ResumeSimulation;
+  SendToClients(spac);
+}
+
+void NetPlayServer::SendPrivateChat(PlayerId target_pid, PlayerId author_pid, const std::string& msg)
+{
+  sf::Packet pac;
+  pac << MessageID::ChatMessage;
+  pac << author_pid;
+  pac << msg;
+  if (const auto it = m_players.find(target_pid); it != m_players.end())
+    Send(it->second.socket, pac);
+}
+
 // called from ---NETPLAY--- thread
 unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
 {
@@ -776,6 +905,540 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
     spac << msg;
 
     SendToClients(spac, player.pid);
+  }
+  break;
+
+  case MessageID::MidJoinAwaitNewUser:
+  {
+    m_midjoin_waiting = true;
+    m_midjoin_all_clients_saved = false;
+    m_midjoin_upload_sent = false;
+    m_midjoin_player_window_started = false;
+    m_midjoin_saved_clients.clear();
+    m_midjoin_baseline_pids.clear();
+    for (const auto& kv : m_players)
+    {
+      if (kv.second.pid != 1)
+        m_midjoin_baseline_pids.insert(kv.second.pid);
+    }
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+      File::IOFile log_file(log_path, "ab");
+      if (log_file)
+      {
+        const std::string& r = fmt::format("server midjoin await start, pure pause broadcast\n");
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+    }
+    SendPurePauseCommand();
+  }
+  break;
+  
+  case MessageID::MidJoinCancelAwait:
+  {
+    m_midjoin_waiting = false;
+    m_midjoin_all_clients_saved = false;
+    m_midjoin_upload_sent = false;
+    m_midjoin_player_window_started = false;
+    m_midjoin_saved_clients.clear();
+    m_midjoin_baseline_pids.clear();
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+      File::IOFile log_file(log_path, "ab");
+      if (log_file)
+      {
+        const std::string& r = fmt::format("server midjoin cancel await, resume broadcast\n");
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+    }
+    SendResumeCommand();
+  }
+  break;
+
+  case MessageID::RequestChangeGame:
+  {
+    // Minimal payload: game_id + sync_hash (20 bytes)
+    std::string req_game_id;
+    packet >> req_game_id;
+    std::array<u8, 20> req_hash{};
+    for (u8& b : req_hash)
+      packet >> b;
+
+    bool exists = false;
+    std::string netplay_name;
+
+    const picojson::value json_data = UICommon::ImportGamesListJson();
+    SyncIdentifier si{};
+    if (json_data.is<picojson::object>())
+    {
+      const auto& root_obj = json_data.get<picojson::object>();
+      auto games_it = root_obj.find("games");
+      if (games_it != root_obj.end() && games_it->second.is<picojson::array>())
+      {
+        const auto& games_array = games_it->second.get<picojson::array>();
+        const std::string req_hash_hex = Common::SHA1::DigestToString(req_hash);
+        for (const auto& v : games_array)
+        {
+          if (!v.is<picojson::object>())
+            continue;
+          const auto& g = v.get<picojson::object>();
+          const auto id_it = g.find("game_id");
+          const auto hash_it = g.find("sync_hash");
+          if (id_it != g.end() && id_it->second.is<std::string>() &&
+              hash_it != g.end() && hash_it->second.is<std::string>())
+          {
+            std::string json_id = id_it->second.get<std::string>();
+            std::string json_hash = hash_it->second.get<std::string>();
+            std::string json_hash_upper = json_hash;
+            Common::ToUpper(&json_hash_upper);
+            std::string req_hash_upper = req_hash_hex;
+            Common::ToUpper(&req_hash_upper);
+            if (json_id == req_game_id && json_hash_upper == req_hash_upper)
+            {
+              exists = true;
+              const auto name_it = g.find("netplay_name");
+              netplay_name = (name_it != g.end() && name_it->second.is<std::string>()) ?
+                                 name_it->second.get<std::string>() :
+                                 json_id;
+
+              si.game_id = req_game_id;
+              si.sync_hash = req_hash;
+
+              const auto dol_elf_size_it = g.find("dol_elf_size");
+              si.dol_elf_size =
+                  (dol_elf_size_it != g.end() && dol_elf_size_it->second.is<double>()) ?
+                      static_cast<u32>(dol_elf_size_it->second.get<double>()) :
+                      0;
+
+              const auto revision_it = g.find("revision");
+              si.revision = (revision_it != g.end() && revision_it->second.is<double>()) ?
+                                static_cast<u16>(revision_it->second.get<double>()) :
+                                0;
+
+              const auto disc_number_it = g.find("disc_number");
+              si.disc_number =
+                  (disc_number_it != g.end() && disc_number_it->second.is<double>()) ?
+                      static_cast<u8>(disc_number_it->second.get<double>()) :
+                      0;
+
+              const auto is_datel_it = g.find("is_datel");
+              si.is_datel = (is_datel_it != g.end() && is_datel_it->second.is<bool>()) ?
+                                is_datel_it->second.get<bool>() :
+                                false;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (exists)
+    {
+      ChangeGame(si, netplay_name);
+    }
+    else
+    {
+      sf::Packet resp;
+      resp << MessageID::ChangeGameNotFound;
+      resp << req_game_id;
+      Send(player.socket, resp);
+    }
+
+  }
+  break;
+
+  case MessageID::RequestChangeGameFull:
+  {
+    std::string game_id;
+    packet >> game_id;
+
+    std::array<u8, 20> sync_hash{};
+    for (u8& b : sync_hash)
+      packet >> b;
+
+    std::string netplay_name;
+    packet >> netplay_name;
+
+    u64 dol_elf_size = Common::PacketReadU64(packet);
+    u16 revision;
+    packet >> revision;
+    u8 disc_number;
+    packet >> disc_number;
+    bool is_datel;
+    packet >> is_datel;
+    u32 region_u32;
+    packet >> region_u32;
+    u32 platform_u32;
+    packet >> platform_u32;
+    bool has_wii_data;
+    packet >> has_wii_data;
+
+    std::vector<u8> tmd;
+    std::vector<u8> ticket;
+    std::vector<u8> cert;
+
+    if (has_wii_data)
+    {
+       u32 size;
+       packet >> size;
+       tmd.resize(size);
+       for(auto& b : tmd) packet >> b;
+
+       packet >> size;
+       ticket.resize(size);
+       for(auto& b : ticket) packet >> b;
+
+       packet >> size;
+       cert.resize(size);
+       for(auto& b : cert) packet >> b;
+    }
+
+    // JSON Update Logic
+    picojson::value json_data = UICommon::ImportGamesListJson();
+    picojson::object root_obj;
+    picojson::array games_array;
+
+    if (json_data.is<picojson::object>())
+    {
+      root_obj = json_data.get<picojson::object>();
+      auto games_it = root_obj.find("games");
+      if (games_it != root_obj.end() && games_it->second.is<picojson::array>())
+      {
+        games_array = games_it->second.get<picojson::array>();
+      }
+    }
+
+    const std::string req_hash_hex = Common::SHA1::DigestToString(sync_hash);
+    
+    // Check if game exists
+    bool exists = false;
+    for (auto& v : games_array)
+    {
+        if (!v.is<picojson::object>()) continue;
+        const auto& g = v.get<picojson::object>();
+        const auto id_it = g.find("game_id");
+        const auto hash_it = g.find("sync_hash");
+        if (id_it != g.end() && id_it->second.is<std::string>() &&
+            hash_it != g.end() && hash_it->second.is<std::string>())
+        {
+            std::string json_id = id_it->second.get<std::string>();
+            std::string json_hash = hash_it->second.get<std::string>();
+            std::string json_hash_upper = json_hash;
+            Common::ToUpper(&json_hash_upper);
+            std::string req_hash_upper = req_hash_hex;
+            Common::ToUpper(&req_hash_upper);
+
+            if (json_id == game_id && json_hash_upper == req_hash_upper)
+            {
+                exists = true;
+                break;
+            }
+        }
+    }
+
+    if (!exists)
+    {
+        picojson::object g;
+        g["netplay_name"] = picojson::value(netplay_name);
+        g["game_id"] = picojson::value(game_id);
+        g["revision"] = picojson::value(static_cast<double>(revision));
+        g["disc_number"] = picojson::value(static_cast<double>(disc_number));
+        g["sync_hash"] = picojson::value(req_hash_hex);
+        
+        std::string region_str = "Unknown";
+        switch(static_cast<DiscIO::Region>(region_u32)) {
+            case DiscIO::Region::NTSC_J: region_str = "NTSC-J"; break;
+            case DiscIO::Region::NTSC_U: region_str = "NTSC-U"; break;
+            case DiscIO::Region::PAL: region_str = "PAL"; break;
+            case DiscIO::Region::NTSC_K: region_str = "NTSC-K"; break;
+            default: break;
+        }
+        g["region"] = picojson::value(region_str);
+
+        picojson::object sync_obj;
+        sync_obj["dol_elf_size"] = picojson::value(static_cast<double>(dol_elf_size));
+        sync_obj["game_id"] = picojson::value(game_id);
+        sync_obj["revision"] = picojson::value(static_cast<double>(revision));
+        sync_obj["disc_number"] = picojson::value(static_cast<double>(disc_number));
+        sync_obj["is_datel"] = picojson::value(is_datel);
+        g["sync_identifier"] = picojson::value(sync_obj);
+
+        if (has_wii_data) {
+            if (!tmd.empty()) {
+                std::string tmd_hex = ArrayToString(tmd.data(), static_cast<u32>(tmd.size()), std::numeric_limits<int>::max(), false);
+                g["tmd"] = picojson::value(tmd_hex);
+                g["tmd_size"] = picojson::value(static_cast<double>(tmd.size()));
+            }
+            if (!ticket.empty()) {
+                std::string ticket_hex = ArrayToString(ticket.data(), static_cast<u32>(ticket.size()), std::numeric_limits<int>::max(), false);
+                g["ticket"] = picojson::value(ticket_hex);
+            }
+            if (!cert.empty()) {
+                 std::string cert_hex = ArrayToString(cert.data(), static_cast<u32>(cert.size()), std::numeric_limits<int>::max(), false);
+                 g["cert"] = picojson::value(cert_hex);
+            }
+        }
+        
+        games_array.push_back(picojson::value(g));
+        root_obj["games"] = picojson::value(games_array);
+        
+        // Timestamp
+        std::time_t now = std::time(nullptr);
+        std::tm* tm_now = std::gmtime(&now);
+        std::ostringstream oss;
+        oss << std::put_time(tm_now, "%Y-%m-%dT%H:%M:%SZ");
+        root_obj["generated_at"] = picojson::value(oss.str());
+
+        const std::string output_path = File::GetUserPath(D_CONFIG_IDX) + "games_list.json";
+        File::CreateFullPath(output_path);
+        JsonToFile(output_path, picojson::value(root_obj), true);
+        
+        INFO_LOG_FMT(NETPLAY, "Added new game to persistent list: {} (Hash: {})", game_id, req_hash_hex);
+    }
+    else
+    {
+        INFO_LOG_FMT(NETPLAY, "Game already exists in persistent list: {} (Hash: {})", game_id, req_hash_hex);
+    }
+
+    SyncIdentifier si;
+    si.game_id = game_id;
+    si.sync_hash = sync_hash;
+    si.dol_elf_size = dol_elf_size;
+    si.revision = revision;
+    si.disc_number = disc_number;
+    si.is_datel = is_datel;
+    
+    ChangeGame(si, netplay_name);
+  }
+  break;
+
+  case MessageID::ChunkedDataStart:
+  {
+    u32 cid;
+    std::string title;
+    packet >> cid >> title;
+    u64 total_size = Common::PacketReadU64(packet);
+    
+    INFO_LOG_FMT(NETPLAY, "Receive ChunkedDataStart from {}: cid={}, title={}, size={}", player.pid, cid, title, total_size);
+    
+    if (title == "Mid-Join Save")
+    {
+      const std::string temp_dir = File::GetUserPath(D_STATESAVES_IDX) + "server_temp" DIR_SEP;
+      if (File::Exists(temp_dir))
+        File::DeleteDirRecursively(temp_dir);
+      File::CreateFullPath(temp_dir);
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+        File::IOFile log_file(log_path, "ab");
+        if (log_file)
+        {
+          const std::string& r = fmt::format("server receiving upload start, clearing server_temp\n");
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+      }
+    }
+    
+    m_chunked_receive_buffers[player.pid][cid] = sf::Packet();
+  }
+  break;
+
+  case MessageID::ChunkedDataPayload:
+  {
+    u32 cid;
+    packet >> cid;
+    
+    if (m_chunked_receive_buffers[player.pid].count(cid))
+    {
+      auto& buffer = m_chunked_receive_buffers[player.pid][cid];
+      while (!packet.endOfPacket())
+      {
+        u8 byte;
+        packet >> byte;
+        buffer << byte;
+      }
+    }
+  }
+  break;
+
+  case MessageID::ChunkedDataEnd:
+  {
+    u32 cid;
+    packet >> cid;
+    
+    if (m_chunked_receive_buffers[player.pid].count(cid))
+    {
+      sf::Packet& full_packet = m_chunked_receive_buffers[player.pid][cid];
+      INFO_LOG_FMT(NETPLAY, "Receive ChunkedDataEnd from {}: cid={}, size={}", player.pid, cid, full_packet.getDataSize());
+      
+      // MidJoin Logic
+      if (m_midjoin_waiting && m_midjoin_pending_pid != 0)
+      {
+           // Save to server_temp
+           const std::string temp_dir = File::GetUserPath(D_STATESAVES_IDX) + "server_temp" DIR_SEP;
+           const std::string temp_path = temp_dir + "midjoin_session.sav.zip";
+           
+           // Clone packet for re-sending (compressed)
+           sf::Packet packet_copy = full_packet;
+           
+           // Save compressed file for debug/backup
+           std::ofstream ofs(temp_path, std::ios::binary);
+           if (ofs)
+           {
+               ofs.write(reinterpret_cast<const char*>(full_packet.getData()), full_packet.getDataSize());
+           }
+
+           if (m_players.count(m_midjoin_pending_pid))
+           {
+               // Forward Compressed Save (Chunked)
+               SendChunked(std::move(packet_copy), m_midjoin_pending_pid, "Mid-Join Save");
+               INFO_LOG_FMT(NETPLAY, "Forwarding MidJoin Save to new player {}.", m_midjoin_pending_pid);
+               {
+                 const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+                 File::IOFile log_file(log_path, "ab");
+                 if (log_file)
+                 {
+                   const std::string& r = fmt::format("server forwarded save to new player\n");
+                   log_file.WriteBytes(r.c_str(), r.size());
+                 }
+               }
+           }
+      }
+
+      m_chunked_receive_buffers[player.pid].erase(cid);
+    }
+  }
+  break;
+
+  case MessageID::MidJoinClientSaved:
+  {
+    if (m_midjoin_waiting)
+    {
+      if (m_midjoin_baseline_pids.contains(player.pid))
+      {
+        m_midjoin_saved_clients.insert(player.pid);
+        {
+          const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+          File::IOFile log_file(log_path, "ab");
+          if (log_file)
+          {
+            const std::string& r = fmt::format("server baseline save ready {}/{}\n",
+                                               int(m_midjoin_saved_clients.size()),
+                                               int(m_midjoin_baseline_pids.size()));
+            log_file.WriteBytes(r.c_str(), r.size());
+          }
+        }
+        if (m_midjoin_saved_clients.size() == m_midjoin_baseline_pids.size())
+        {
+          m_midjoin_all_clients_saved = true;
+          TryTriggerMidJoinUpload();
+        }
+      }
+    }
+  }
+  break;
+
+  case MessageID::MidJoinNewUserDecompressed:
+  {
+    if (m_midjoin_waiting && player.pid == m_midjoin_pending_pid)
+    {
+      m_midjoin_player_decompressed = true;
+      sf::Packet start_game_packet;
+      BuildStartGamePacket(start_game_packet);
+      SendAsync(std::move(start_game_packet), player.pid);
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+        File::IOFile log_file(log_path, "ab");
+        if (log_file)
+        {
+          const std::string& r = fmt::format("server received new user decompress, send StartGame\n");
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+      }
+    }
+  }
+  break;
+
+  case MessageID::MidJoinNewUserWindowStarted:
+  {
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+      File::IOFile log_file(log_path, "ab");
+      if (log_file)
+      {
+        const std::string& r = fmt::format("OnData: MidJoinNewUserWindowStarted from {} (pending={})\n", player.pid, m_midjoin_pending_pid);
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+    }
+    // m_midjoin_waiting && player.pid == m_midjoin_pending_pid
+    if (1)
+    {
+      if (!m_midjoin_player_window_started)
+      {
+        m_midjoin_player_window_started = true;
+        SendResumeCommand();
+        {
+          const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+          File::IOFile log_file(log_path, "ab");
+          if (log_file)
+          {
+            const std::string& r = fmt::format("server received new user window started, broadcast Resume\n");
+            log_file.WriteBytes(r.c_str(), r.size());
+          }
+        }
+        {
+          const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+          File::IOFile log_file(log_path, "ab");
+          if (log_file)
+          {
+            const std::string& r = fmt::format("state: waiting={}, window_started={}\n",
+                                               m_midjoin_waiting ? 1 : 0,
+                                               m_midjoin_player_window_started ? 1 : 0);
+            log_file.WriteBytes(r.c_str(), r.size());
+          }
+        }
+      }
+    }
+  }
+  break;
+
+  case MessageID::MidJoinNewUserLoaded:
+  {
+    if (m_midjoin_waiting && player.pid == m_midjoin_pending_pid)
+    {
+      m_midjoin_waiting = false;
+      m_midjoin_pending_pid = 0;
+      m_midjoin_player_decompressed = false;
+      m_midjoin_player_window_started = false;
+      m_midjoin_all_clients_saved = false;
+      m_midjoin_upload_sent = false;
+      m_midjoin_saved_clients.clear();
+      m_midjoin_baseline_pids.clear();
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+        File::IOFile log_file(log_path, "ab");
+        if (log_file)
+        {
+          const std::string& r = fmt::format("server received new user loaded, session reset\n");
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+      }
+      SendResumeCommand();
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "new_user.txt";
+        File::IOFile log_file(log_path, "ab");
+        if (log_file)
+        {
+          const std::string& r = fmt::format("server loaded final Resume broadcast\n");
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+      }
+    }
+  }
+  break;
+
+  case MessageID::Ready:
+  {
+      OnReady(packet, player);
   }
   break;
 
@@ -817,21 +1480,42 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
       PadIndex map;
       packet >> map;
 
-      // If the data is not from the correct player,
-      // then disconnect them.
-      if (m_pad_map.at(map) != player.pid)
-      {
-        return 1;
-      }
+      // 如果发现控制器映射与玩家 PID 不匹配，则进入「宽限 N 帧」容错逻辑。
+      // N = 22 帧（约 0.37 s）以涵盖 PadBuffer 深度与网络 RTT 抖动。
+      const bool mapping_match = (m_pad_map.at(map) == player.pid);
 
+      // 先无条件读取完整 PadData，保证 packet 对齐
       GCPadStatus pad;
       packet >> pad.button;
-      spac << map << pad.button;
       if (!m_gba_config.at(map).enabled)
       {
         packet >> pad.analogA >> pad.analogB >> pad.stickX >> pad.stickY >> pad.substickX >>
             pad.substickY >> pad.triggerLeft >> pad.triggerRight >> pad.isConnected;
+      }
 
+      if (!mapping_match)
+      {
+        if (m_pad_mapping_grace_counter < PAD_MAPPING_GRACE_FRAMES)
+        {
+          ++m_pad_mapping_grace_counter; // 仍在宽限期 —— 继续转发，避免卡顿
+        }
+        else
+        {
+          // 超过宽限期仍不匹配，认为客户端未按要求切换端口；终止处理本条消息
+          WARN_LOG_FMT(NETPLAY, "Pad mapping mismatch beyond grace period (map {} expect {}, got {}).", static_cast<int>(map), m_pad_map.at(map), player.pid);
+          break;
+        }
+      }
+      else
+      {
+        // 匹配正确，重置计数器
+        m_pad_mapping_grace_counter = 0;
+      }
+
+      // 无论是否处于宽限期，只要没有超期，都把 PadData 转发给其他客户端
+      spac << map << pad.button;
+      if (!m_gba_config.at(map).enabled)
+      {
         spac << pad.analogA << pad.analogB << pad.stickX << pad.stickY << pad.substickX
              << pad.substickY << pad.triggerLeft << pad.triggerRight << pad.isConnected;
       }
@@ -1017,6 +1701,8 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
     sf::Packet spac;
     spac << MessageID::StopGame;
 
+    NetPlay::NetplayManager::GetInstance().resetClientsExceptHost_NoLock();
+
     std::lock_guard lkp(m_crit.players);
     SendToClients(spac);
   }
@@ -1046,11 +1732,111 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
   }
   break;
 
+  case MessageID::ClientInitialStateAck:
+  {
+    auto& netPlayManager = NetplayManager::GetInstance();
+    bool has_initial_state = false;
+    packet >> has_initial_state;
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    File::IOFile log_file(log_path, "ab");
+    if (log_file)
+    {
+      const std::string& r = fmt::format("server has_initial_state:{}, player:{}\n",
+                                           has_initial_state, player.pid);
+      log_file.WriteBytes(r.c_str(), r.size());
+    }
+    if (log_file)
+    {
+      const std::string& r = fmt::format("Player {} reported HasInitialStateSave = {}\n",
+                                           player.pid, has_initial_state);
+      log_file.WriteBytes(r.c_str(), r.size());
+    }
+    if (m_midjoin_waiting)
+    {
+      if (log_file)
+      {
+        const std::string& r =
+            fmt::format("ClientInitialStateAck ignored due to mid-join waiting (pid={}, has_initial={})\n",
+                        player.pid, has_initial_state);
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+      break;
+    }
+    if (has_initial_state) {
+      if (log_file)
+      {
+        const std::string& r = fmt::format("Player {} has initial state save.\n", player.pid);
+        log_file.WriteBytes(r.c_str(), r.size());
+      }
+      if (netPlayManager.setClientLoadStatusSuccess(player.pid)) {
+        if (log_file)
+        {
+          const std::string& r = fmt::format("Player {} set load status success.\n", player.pid);
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+        if (netPlayManager.canLoadStatus()) {
+          if (log_file)
+          {
+            const std::string& r = fmt::format("All clients ready, now can send pause order.\n");
+            log_file.WriteBytes(r.c_str(), r.size());
+          }
+            if (log_file)
+            {
+                const std::string& r = "All clients ready, starting to load state.\n";
+                log_file.WriteBytes(r.c_str(), r.size());
+            }
+            SendPauseCommand();
+
+            // Launch a detached thread that will resume the simulation after a 1-second delay.
+            std::thread([this]() {
+              // Sleep for 1 second to give clients time to process the pause and load state.
+              std::this_thread::sleep_for(std::chrono::seconds(1));
+              // After the delay, send the resume command.
+              SendResumeCommand();
+            }).detach();
+
+            if (log_file)
+            {
+                const std::string& r = "Pause command sent.\n";
+                log_file.WriteBytes(r.c_str(), r.size());
+            }
+        }
+      } else {
+        if (log_file)
+        {
+          const std::string& r = fmt::format("Player {} set load status failed.\n", player.pid);
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+      }
+    } else {
+        if (log_file)
+        {
+          const std::string& r = fmt::format("Player {} has no initial state save.\n", player.pid);
+          log_file.WriteBytes(r.c_str(), r.size());
+        }
+    }
+  }
+  break;
+
   case MessageID::PowerButton:
   {
     sf::Packet spac;
     spac << MessageID::PowerButton;
     SendToClients(spac, player.pid);
+  }
+  break;
+
+  case MessageID::RequestStartGameClient:
+  {
+    // if (m_dialog && m_dialog->IsSharingEnabled())
+    if (m_dialog)
+    {
+      OnRequestStartGameClient(player);
+    }
+    else
+    {
+      
+    }
   }
   break;
 
@@ -1127,6 +1913,85 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
   }
   break;
 
+  case MessageID::REQUEST_PAD_MAPPING_CHANGE_ID: // Ensure this ID matches the one in NetPlayProto.h
+  {
+    INFO_LOG_FMT(NETPLAY, "Received REQUEST_PAD_MAPPING_CHANGE_ID from player {} ({})", player.pid, player.name);
+    PadMappingArray gc_map_from_client;
+    GBAConfigArray gba_cfg_from_client;
+    PadMappingArray wii_map_from_client;
+
+    // Deserialize PadMappingArray (gc_map_from_client)
+    for (PlayerId& mapping : gc_map_from_client)
+    {
+      if (!(packet >> mapping))
+      {
+        WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_PAD_MAPPING_CHANGE_ID too short for GC map (PlayerId) from PID {}.", player.pid);
+        return 1; // Indicate error / disconnect
+      }
+    }
+
+    // Deserialize GBAConfigArray (gba_cfg_from_client)
+    for (GBAConfig& config : gba_cfg_from_client)
+    {
+      if (!(packet >> config.enabled >> config.has_rom >> config.title))
+      {
+        WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_PAD_MAPPING_CHANGE_ID too short for GBA config (metadata) from PID {}.", player.pid);
+        return 1; // Indicate error / disconnect
+      }
+      for (u8& hash_byte : config.hash)
+      {
+        if (!(packet >> hash_byte))
+        {
+          WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_PAD_MAPPING_CHANGE_ID too short for GBA config (hash) from PID {}.", player.pid);
+          return 1; // Indicate error / disconnect
+        }
+      }
+    }
+
+    // Deserialize PadMappingArray (wii_map_from_client)
+    for (PlayerId& mapping : wii_map_from_client)
+    {
+      if (!(packet >> mapping))
+      {
+        WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_PAD_MAPPING_CHANGE_ID too short for Wii map (PlayerId) from PID {}.", player.pid);
+        return 1; // Indicate error / disconnect
+      }
+    }
+
+    // TODO: Validate the data if necessary (e.g., PIDs are valid)
+    SetPadMapping(gc_map_from_client);
+    SetGBAConfig(gba_cfg_from_client, true); // Assuming 'true' triggers broadcast
+    SetWiimoteMapping(wii_map_from_client);
+    // The Set... methods should already handle broadcasting the update to all clients.
+  }
+  break;
+
+  case MessageID::REQUEST_BUFFER_CHANGE_ID:
+  {
+    s32 requested_buffer_value;
+    // Check if there's enough data for s32
+    if (packet.getReadPosition() + sizeof(s32) > packet.getDataSize()) {
+        WARN_LOG_FMT(NETPLAY, "Packet for REQUEST_BUFFER_CHANGE_ID too short to contain buffer value from PID {}.", player.pid);
+        return 1; // Indicate error / disconnect client
+    }
+    if (!(packet >> requested_buffer_value)) {
+        WARN_LOG_FMT(NETPLAY, "Failed to deserialize buffer value from REQUEST_BUFFER_CHANGE_ID (PID: {}).", player.pid);
+        return 1; // Indicate error / disconnect client
+    }
+
+    INFO_LOG_FMT(NETPLAY, "Player PID {} ({}) requested buffer change to: {}", player.pid, player.name, requested_buffer_value);
+    
+    // As per user request, skipping min/max validation if not already part of AdjustPadBufferSize.
+    // AdjustPadBufferSize takes unsigned int.
+    if (requested_buffer_value < 0) {
+        WARN_LOG_FMT(NETPLAY, "Player PID {} ({}) requested negative buffer value {}. Clamping to 0.", player.pid, player.name, requested_buffer_value);
+        requested_buffer_value = 0;
+    }
+    this->AdjustPadBufferSize(static_cast<unsigned int>(requested_buffer_value));
+    // AdjustPadBufferSize will handle broadcasting if not in HIA mode.
+  }
+  break;
+
   case MessageID::GameDigestError:
   {
     std::string error;
@@ -1151,6 +2016,104 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
 
     switch (sub_id)
     {
+    case SyncSaveDataID::UploadIntent:
+    {
+      const bool allowed = m_settings.savedata_write;
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+        File::IOFile lf(log_path, "ab");
+        if (lf)
+        {
+          const std::string line = fmt::format("[SERVER] UploadIntent allowed={} pid={}\n", allowed, player.pid);
+          lf.WriteBytes(line.data(), line.size());
+        }
+      }
+      if (m_dialog)
+        m_dialog->AppendChat(allowed ? "允许上传存档，开始等待数据..."
+                                     : "拒绝上传存档：未启用写回主机存档");
+      sf::Packet resp;
+      resp << MessageID::SyncSaveData;
+      resp << (allowed ? SyncSaveDataID::AllowUpload : SyncSaveDataID::Failure);
+      Send(player.socket, resp);
+    }
+    break;
+
+    case SyncSaveDataID::WiiData:
+    {
+      std::vector<u64> titles;
+      const std::string redirect_target = File::GetUserPath(D_USER_IDX) + "RedirectSession" DIR_SEP;
+      const std::string temp_root = File::GetUserPath(D_USER_IDX) + "WiiUploadSession" DIR_SEP;
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+        File::IOFile lf(log_path, "ab");
+        if (lf)
+        {
+          const std::string line = fmt::format("[SERVER] WiiData recv temp_root='{}' redirect='{}'\n", temp_root, redirect_target);
+          lf.WriteBytes(line.data(), line.size());
+        }
+      }
+      if (m_dialog)
+        m_dialog->AppendChat(Common::FmtFormatT("收到上传数据，开始解包到：{0}，重定向：{1}", temp_root,
+                                               redirect_target));
+      auto temp_fs = std::make_unique<IOS::HLE::FS::HostFileSystem>(temp_root);
+
+      const bool decode_ok = NetPlayUpload::ServerDecodeWiiSaveUploadPacketToFS(
+          packet, temp_fs.get(), redirect_target, &titles);
+
+      if (!decode_ok)
+      {
+        const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+        File::IOFile lf(log_path, "ab");
+        if (lf)
+        {
+          const std::string line = "[SERVER] WiiData decode failed\n";
+          lf.WriteBytes(line.data(), line.size());
+        }
+        if (m_dialog)
+          m_dialog->AppendChat("上传解包失败");
+        sf::Packet resp;
+        resp << MessageID::SyncSaveData;
+        resp << SyncSaveDataID::Failure;
+        Send(player.socket, resp);
+        break;
+      }
+
+      ENetPeer* sock = player.socket;
+      if (m_dialog)
+        m_dialog->AppendChat("解包成功，开始覆盖主机存档...");
+      std::thread([this, sock, titles = std::move(titles), temp_fs = std::move(temp_fs)]() mutable {
+        {
+          const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+          File::IOFile lf(log_path, "ab");
+          if (lf)
+          {
+            const std::string line = fmt::format("[SERVER] Apply start titles={}\n", fmt::join(titles, ","));
+            lf.WriteBytes(line.data(), line.size());
+          }
+        }
+        auto configured_fs = IOS::HLE::FS::MakeFileSystem(IOS::HLE::FS::Location::Configured);
+        const bool apply_ok = NetPlayUpload::ServerApplyUploadedWiiSaves(
+            temp_fs.get(), configured_fs.get(), titles, true);
+
+        if (m_dialog)
+          m_dialog->AppendChat(apply_ok ? "上传存档应用成功" : "上传存档应用失败");
+        {
+          const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "serverhash8.txt";
+          File::IOFile lf(log_path, "ab");
+          if (lf)
+          {
+            const std::string line = fmt::format("[SERVER] Apply done ok={}\n", apply_ok);
+            lf.WriteBytes(line.data(), line.size());
+          }
+        }
+        sf::Packet resp;
+        resp << MessageID::SyncSaveData;
+        resp << (apply_ok ? SyncSaveDataID::Success : SyncSaveDataID::Failure);
+        Send(sock, resp);
+      }).detach();
+    }
+    break;
+
     case SyncSaveDataID::Success:
     {
       if (m_start_pending)
@@ -1308,6 +2271,319 @@ bool NetPlayServer::ChangeGame(const SyncIdentifier& sync_identifier,
   m_selected_game_identifier = sync_identifier;
   m_selected_game_name = netplay_name;
 
+  // Reset client states except host when game changes
+  NetPlay::NetplayManager::GetInstance().resetClientsExceptHost_NoLock();
+
+  // Compute and set SaveHash8 early so that server-only host (not entering game)
+  // can still resolve correct NAND save paths for Wii titles.
+  const std::string hash_str = Common::SHA1::DigestToString(sync_identifier.sync_hash);
+  const std::string hash8 = hash_str.substr(0, 8);
+  SConfig::GetInstance().SetSaveHash8(hash8);
+
+  NetplayManager::GetInstance().SetCurrentGame(m_selected_game_identifier, m_selected_game_name);
+
+  // Debug logging similar to previous instrumentation
+  const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+  File::WriteStringToFile(log_path, "[NPDEBUG] ChangeGame set SaveHash8=" + hash8 + "\n");
+
+  {
+    const std::string gid = m_selected_game_identifier.game_id;
+    if (gid.size() == 6)
+    {
+      const u32 type_high = 0x00010000u;
+      const u32 id_low = (static_cast<u8>(gid[0]) << 24) | (static_cast<u8>(gid[1]) << 16) |
+                         (static_cast<u8>(gid[2]) << 8) | static_cast<u8>(gid[3]);
+      const u64 title_id = (static_cast<u64>(type_high) << 32) | static_cast<u64>(id_low);
+
+      {
+        const std::string tmd_dir_dbg = Common::GetTitleContentPath(title_id);
+        const std::string tmd_path_dbg = Common::GetTMDFileName(title_id);
+        const std::string log_path2 = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+        File::IOFile lf(log_path2, "ab");
+        if (lf)
+        {
+          const std::string line = fmt::format("[NPDEBUG] ChangeGame: title_id={:016x}, tmd_dir='{}', tmd_path='{}'\n",
+                                              title_id, tmd_dir_dbg, tmd_path_dbg);
+          lf.WriteBytes(line.data(), line.size());
+        }
+      }
+
+      IOS::HLE::Kernel ios;
+      if (!ios.GetESCore().FindInstalledTMD(title_id).IsValid())
+      {
+        {
+          const std::string log_path2 = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+          File::IOFile lf(log_path2, "ab");
+          if (lf)
+          {
+            const std::string line = fmt::format("[NPDEBUG] ChangeGame: installed_tmd_exists=false for {:016x}\n",
+                                                title_id);
+            lf.WriteBytes(line.data(), line.size());
+          }
+        }
+        std::vector<u8> tmd_bytes;
+        {
+          const picojson::value json_data = UICommon::ImportGamesListJson();
+          if (json_data.is<picojson::object>())
+          {
+            const auto& root_obj = json_data.get<picojson::object>();
+            auto games_it = root_obj.find("games");
+            if (games_it != root_obj.end() && games_it->second.is<picojson::array>())
+            {
+              const auto& games_array = games_it->second.get<picojson::array>();
+              const std::string req_hash_hex = Common::SHA1::DigestToString(m_selected_game_identifier.sync_hash);
+              std::string req_hash_upper = req_hash_hex;
+              Common::ToUpper(&req_hash_upper);
+              for (const auto& v : games_array)
+              {
+                if (!v.is<picojson::object>())
+                  continue;
+                const auto& g = v.get<picojson::object>();
+                const auto id_it = g.find("game_id");
+                const auto hash_it = g.find("sync_hash");
+                const auto tmd_it = g.find("tmd");
+                if (id_it != g.end() && id_it->second.is<std::string>() &&
+                    hash_it != g.end() && hash_it->second.is<std::string>() &&
+                    tmd_it != g.end() && tmd_it->second.is<std::string>())
+                {
+                  std::string json_id = id_it->second.get<std::string>();
+                  std::string json_hash = hash_it->second.get<std::string>();
+                  std::string json_hash_upper = json_hash;
+                  Common::ToUpper(&json_hash_upper);
+                  if (json_id == gid && json_hash_upper == req_hash_upper)
+                  {
+                    const std::string tmd_hex = tmd_it->second.get<std::string>();
+                    auto hex_to_bytes = [](const std::string& s) {
+                      std::vector<u8> out;
+                      int hi = -1;
+                      for (char c : s)
+                      {
+                        if (c == ' ' || c == '\n' || c == '\r' || c == '\t')
+                          continue;
+                        u8 v = 0;
+                        if (c >= '0' && c <= '9')
+                          v = static_cast<u8>(c - '0');
+                        else if (c >= 'a' && c <= 'f')
+                          v = static_cast<u8>(c - 'a' + 10);
+                        else if (c >= 'A' && c <= 'F')
+                          v = static_cast<u8>(c - 'A' + 10);
+                        else
+                          continue;
+                        if (hi < 0)
+                          hi = v;
+                        else
+                        {
+                          out.push_back(static_cast<u8>((hi << 4) | v));
+                          hi = -1;
+                        }
+                      }
+                      return out;
+                    };
+                    tmd_bytes = hex_to_bytes(tmd_hex);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        std::vector<u8> ticket_bytes;
+        std::vector<u8> cert_bytes;
+        {
+          const picojson::value json_data2 = UICommon::ImportGamesListJson();
+          if (json_data2.is<picojson::object>())
+          {
+            const auto& root_obj2 = json_data2.get<picojson::object>();
+            auto games_it2 = root_obj2.find("games");
+            if (games_it2 != root_obj2.end() && games_it2->second.is<picojson::array>())
+            {
+              const auto& games_array2 = games_it2->second.get<picojson::array>();
+              const std::string req_hash_hex2 = Common::SHA1::DigestToString(m_selected_game_identifier.sync_hash);
+              std::string req_hash_upper2 = req_hash_hex2;
+              Common::ToUpper(&req_hash_upper2);
+              for (const auto& v2 : games_array2)
+              {
+                if (!v2.is<picojson::object>())
+                  continue;
+                const auto& g2 = v2.get<picojson::object>();
+                const auto id_it2 = g2.find("game_id");
+                const auto hash_it2 = g2.find("sync_hash");
+                const auto ticket_it2 = g2.find("ticket");
+                const auto cert_it2 = g2.find("cert");
+                if (id_it2 != g2.end() && id_it2->second.is<std::string>() &&
+                    hash_it2 != g2.end() && hash_it2->second.is<std::string>())
+                {
+                  std::string json_id2 = id_it2->second.get<std::string>();
+                  std::string json_hash2 = hash_it2->second.get<std::string>();
+                  std::string json_hash_upper2 = json_hash2;
+                  Common::ToUpper(&json_hash_upper2);
+                  if (json_id2 == gid && json_hash_upper2 == req_hash_upper2)
+                  {
+                    auto hex_to_bytes2 = [](const std::string& s) {
+                      std::vector<u8> out;
+                      int hi = -1;
+                      for (char c : s)
+                      {
+                        if (c == ' ' || c == '\n' || c == '\r' || c == '\t')
+                          continue;
+                        u8 v = 0;
+                        if (c >= '0' && c <= '9')
+                          v = static_cast<u8>(c - '0');
+                        else if (c >= 'a' && c <= 'f')
+                          v = static_cast<u8>(c - 'a' + 10);
+                        else if (c >= 'A' && c <= 'F')
+                          v = static_cast<u8>(c - 'A' + 10);
+                        else
+                          continue;
+                        if (hi < 0)
+                          hi = v;
+                        else
+                        {
+                          out.push_back(static_cast<u8>((hi << 4) | v));
+                          hi = -1;
+                        }
+                      }
+                      return out;
+                    };
+                    if (ticket_it2 != g2.end() && ticket_it2->second.is<std::string>())
+                      ticket_bytes = hex_to_bytes2(ticket_it2->second.get<std::string>());
+                    if (cert_it2 != g2.end() && cert_it2->second.is<std::string>())
+                      cert_bytes = hex_to_bytes2(cert_it2->second.get<std::string>());
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        bool strict_done = false;
+        if (!tmd_bytes.empty() && !cert_bytes.empty() && !ticket_bytes.empty())
+        {
+          IOS::HLE::ESCore& es = ios.GetESCore();
+          const auto ticket_rc = es.ImportTicket(ticket_bytes, cert_bytes,
+                                                IOS::HLE::ESCore::TicketImportType::PossiblyPersonalised,
+                                                IOS::HLE::ESCore::VerifySignature::Yes);
+          if (ticket_rc == IOS::HLE::IPC_SUCCESS)
+          {
+            IOS::HLE::ESCore::Context ctx;
+            ctx.uid = IOS::SYSMENU_UID;
+            ctx.gid = IOS::SYSMENU_GID;
+            const auto init_rc = es.ImportTitleInit(ctx, tmd_bytes, cert_bytes,
+                                                    IOS::HLE::ESCore::VerifySignature::Yes);
+            if (init_rc == IOS::HLE::IPC_SUCCESS)
+            {
+              const auto done_rc = es.ImportTitleDone(ctx);
+              strict_done = (done_rc == IOS::HLE::IPC_SUCCESS);
+            }
+          }
+          {
+            const std::string log_path2 = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+            File::IOFile lf(log_path2, "ab");
+            if (lf)
+            {
+              const std::string line = fmt::format(
+                  "[NPDEBUG] ChangeGame: strict_import ticket_rc={} done={}\n",
+                  static_cast<int>(ticket_rc), strict_done ? 1 : 0);
+              lf.WriteBytes(line.data(), line.size());
+            }
+          }
+        }
+
+        if (tmd_bytes.empty())
+        {
+          tmd_bytes.resize(sizeof(IOS::ES::TMDHeader));
+          auto put_u32 = [&tmd_bytes](size_t off, u32 v) {
+            tmd_bytes[off + 0] = static_cast<u8>((v >> 24) & 0xff);
+            tmd_bytes[off + 1] = static_cast<u8>((v >> 16) & 0xff);
+            tmd_bytes[off + 2] = static_cast<u8>((v >> 8) & 0xff);
+            tmd_bytes[off + 3] = static_cast<u8>(v & 0xff);
+          };
+          auto put_u64 = [&put_u32](size_t off, u64 v) {
+            put_u32(off + 0, static_cast<u32>((v >> 32) & 0xffffffffu));
+            put_u32(off + 4, static_cast<u32>(v & 0xffffffffu));
+          };
+          auto put_u16 = [&tmd_bytes](size_t off, u16 v) {
+            tmd_bytes[off + 0] = static_cast<u8>((v >> 8) & 0xff);
+            tmd_bytes[off + 1] = static_cast<u8>(v & 0xff);
+          };
+
+          put_u32(0, static_cast<u32>(IOS::SignatureType::RSA2048));
+          tmd_bytes[offsetof(IOS::ES::TMDHeader, tmd_version)] = 1;
+          tmd_bytes[offsetof(IOS::ES::TMDHeader, ca_crl_version)] = 0;
+          tmd_bytes[offsetof(IOS::ES::TMDHeader, signer_crl_version)] = 0;
+          tmd_bytes[offsetof(IOS::ES::TMDHeader, is_vwii)] = 0;
+          put_u64(offsetof(IOS::ES::TMDHeader, ios_id), 0x000000010000003aULL);
+          put_u64(offsetof(IOS::ES::TMDHeader, title_id), title_id);
+          put_u32(offsetof(IOS::ES::TMDHeader, title_flags), IOS::ES::TITLE_TYPE_DEFAULT);
+          tmd_bytes[offsetof(IOS::ES::TMDHeader, group_id) + 0] = static_cast<u8>(gid[4]);
+          tmd_bytes[offsetof(IOS::ES::TMDHeader, group_id) + 1] = static_cast<u8>(gid[5]);
+          put_u16(offsetof(IOS::ES::TMDHeader, region), 0);
+          put_u32(offsetof(IOS::ES::TMDHeader, access_rights), 0);
+          put_u16(offsetof(IOS::ES::TMDHeader, title_version), 1);
+          put_u16(offsetof(IOS::ES::TMDHeader, num_contents), 0);
+          put_u16(offsetof(IOS::ES::TMDHeader, boot_index), 0);
+        }
+
+        constexpr IOS::HLE::FS::Modes modes{IOS::HLE::FS::Mode::ReadWrite, IOS::HLE::FS::Mode::ReadWrite,
+                                            IOS::HLE::FS::Mode::None};
+        const std::string tmp_path = "/tmp/title.tmd";
+        bool wrote_tmp = false;
+        {
+          auto tmp_file = ios.GetFS()->CreateAndOpenFile(IOS::PID_KERNEL, IOS::PID_KERNEL, tmp_path, modes);
+          if (!strict_done && tmp_file)
+          {
+            auto wr = tmp_file->Write(tmd_bytes.data(), tmd_bytes.size());
+            if (wr && *wr == tmd_bytes.size())
+              wrote_tmp = true;
+          }
+        }
+        if (wrote_tmp)
+        {
+          const std::string tmd_dir = Common::GetTitleContentPath(title_id);
+          const std::string tmd_path = Common::GetTMDFileName(title_id);
+          ios.GetFS()->CreateFullPath(IOS::PID_KERNEL, IOS::PID_KERNEL, tmd_path, 0,
+                                      {IOS::HLE::FS::Mode::ReadWrite, IOS::HLE::FS::Mode::ReadWrite,
+                                       IOS::HLE::FS::Mode::Read});
+          ios.GetFS()->SetMetadata(IOS::PID_KERNEL, tmd_dir, IOS::PID_KERNEL, IOS::PID_KERNEL, 0,
+                                   modes);
+          {
+            const std::string log_path2 = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+            File::IOFile lf(log_path2, "ab");
+            if (lf)
+            {
+              const std::string line = fmt::format("[NPDEBUG] ChangeGame: renaming '{}' -> '{}'\n", tmp_path, tmd_path);
+              lf.WriteBytes(line.data(), line.size());
+            }
+          }
+          const auto rename_rc = ios.GetFS()->Rename(IOS::PID_KERNEL, IOS::PID_KERNEL, tmp_path, tmd_path);
+          {
+            const std::string log_path2 = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+            File::IOFile lf(log_path2, "ab");
+            if (lf)
+            {
+              const std::string line = fmt::format("[NPDEBUG] ChangeGame: rename result={} to '{}'\n",
+                                                   static_cast<int>(rename_rc), tmd_path);
+              lf.WriteBytes(line.data(), line.size());
+            }
+          }
+        }
+      }
+      else
+      {
+        const std::string log_path2 = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+        File::IOFile lf(log_path2, "ab");
+        if (lf)
+        {
+          const std::string line = fmt::format("[NPDEBUG] ChangeGame: installed_tmd_exists=true for {:016x}\n",
+                                              title_id);
+          lf.WriteBytes(line.data(), line.size());
+        }
+      }
+    }
+  }
+
   // send changed game to clients
   sf::Packet spac;
   spac << MessageID::ChangeGame;
@@ -1344,6 +2620,18 @@ bool NetPlayServer::AbortGameDigest()
 // called from ---GUI--- thread
 bool NetPlayServer::SetupNetSettings()
 {
+  INFO_LOG_FMT(NETPLAY, "Loading game settings for {:02x}.",
+               fmt::join(m_selected_game_identifier.sync_hash, ""));
+
+  NetPlay::NetSettings settings;
+
+#if IS_SERVER
+  // Server mode: use selected identifier directly, do not depend on GameFile
+  Config::AddLayer(ConfigLoaders::GenerateGlobalGameConfigLoader(
+      m_selected_game_identifier.game_id, m_selected_game_identifier.revision));
+  Config::AddLayer(ConfigLoaders::GenerateLocalGameConfigLoader(
+      m_selected_game_identifier.game_id, m_selected_game_identifier.revision));
+#else
   const auto game = m_dialog->FindGameFile(m_selected_game_identifier);
   if (game == nullptr)
   {
@@ -1353,16 +2641,12 @@ bool NetPlayServer::SetupNetSettings()
     return false;
   }
 
-  INFO_LOG_FMT(NETPLAY, "Loading game settings for {:02x}.",
-               fmt::join(m_selected_game_identifier.sync_hash, ""));
-
-  NetPlay::NetSettings settings;
-
   // Load GameINI so we can sync the settings from it
   Config::AddLayer(
       ConfigLoaders::GenerateGlobalGameConfigLoader(game->GetGameID(), game->GetRevision()));
   Config::AddLayer(
       ConfigLoaders::GenerateLocalGameConfigLoader(game->GetGameID(), game->GetRevision()));
+#endif
 
   // Copy all relevant settings
   settings.cpu_thread = Config::Get(Config::MAIN_CPU_THREAD);
@@ -1574,6 +2858,8 @@ bool NetPlayServer::StartGame()
   // only used as an identifier, not time value, so truncation is fine
   m_current_game = static_cast<u32>(Common::Timer::NowMs());
 
+  NetPlay::NetplayManager::GetInstance().resetClientsExceptHost_NoLock();
+
   // no change, just update with clients
   if (!m_host_input_authority)
     AdjustPadBufferSize(m_target_buffer_size);
@@ -1581,10 +2867,16 @@ bool NetPlayServer::StartGame()
   m_current_golfer = 1;
   m_pending_golfer = 0;
 
-  const u64 initial_rtc = GetInitialNetPlayRTC();
-
+#if IS_SERVER
+  // Server mode: derive region directory without relying on GameFile.
+  // Prefer configured fallback; region-specific handling is not required for hosting.
+  const DiscIO::Region used_region = Config::Get(Config::MAIN_FALLBACK_REGION);
+  const std::string region =
+      Config::GetDirectoryForRegion(Config::ToGameCubeRegion(used_region));
+#else
   const std::string region = Config::GetDirectoryForRegion(
       Config::ToGameCubeRegion(m_dialog->FindGameFile(m_selected_game_identifier)->GetRegion()));
+#endif
 
   // load host's GC SRAM
   SConfig::GetInstance().m_strSRAM = File::GetUserPath(F_GCSRAM_IDX);
@@ -1592,6 +2884,17 @@ bool NetPlayServer::StartGame()
 
   // tell clients to start game
   sf::Packet spac;
+  BuildStartGamePacket(spac);
+  SendAsyncToClients(std::move(spac));
+
+  m_start_pending = false;
+  m_is_running = true;
+
+  return true;
+}
+
+void NetPlayServer::BuildStartGamePacket(sf::Packet& spac)
+{
   spac << MessageID::StartGame;
   spac << m_current_game;
   spac << m_settings.cpu_thread;
@@ -1667,7 +2970,21 @@ bool NetPlayServer::StartGame()
   spac << m_settings.savedata_write;
   spac << m_settings.savedata_sync_all_wii;
   spac << m_settings.strict_settings_sync;
+  
+  const u64 initial_rtc = GetInitialNetPlayRTC();
   spac << initial_rtc;
+
+#if IS_SERVER
+  // Server mode: derive region directory without relying on GameFile.
+  // Prefer configured fallback; region-specific handling is not required for hosting.
+  const DiscIO::Region used_region = Config::Get(Config::MAIN_FALLBACK_REGION);
+  const std::string region =
+      Config::GetDirectoryForRegion(Config::ToGameCubeRegion(used_region));
+#else
+  const std::string region = Config::GetDirectoryForRegion(
+      Config::ToGameCubeRegion(m_dialog->FindGameFile(m_selected_game_identifier)->GetRegion()));
+#endif
+
   spac << region;
   spac << m_settings.sync_codes;
 
@@ -1677,13 +2994,6 @@ bool NetPlayServer::StartGame()
 
   for (size_t i = 0; i < sizeof(m_settings.sram); ++i)
     spac << m_settings.sram[i];
-
-  SendAsyncToClients(std::move(spac));
-
-  m_start_pending = false;
-  m_is_running = true;
-
-  return true;
 }
 
 void NetPlayServer::AbortGameStart()
@@ -1724,14 +3034,17 @@ std::optional<SaveSyncInfo> NetPlayServer::CollectSaveSyncInfo()
     }
   }
 
+#if !IS_SERVER
   sync_info.game = m_dialog->FindGameFile(m_selected_game_identifier);
   if (sync_info.game == nullptr)
   {
     PanicAlertFmtT("Selected game doesn't exist in game list!");
     return std::nullopt;
   }
+#endif
 
   sync_info.has_wii_save = false;
+#if !IS_SERVER
   if (m_settings.savedata_load && (sync_info.game->GetPlatform() == DiscIO::Platform::WiiDisc ||
                                    sync_info.game->GetPlatform() == DiscIO::Platform::WiiWAD ||
                                    sync_info.game->GetPlatform() == DiscIO::Platform::ELFOrDOL))
@@ -1789,6 +3102,70 @@ std::optional<SaveSyncInfo> NetPlayServer::CollectSaveSyncInfo()
       }
     }
   }
+#else
+  if (m_settings.savedata_load)
+  {
+    INFO_LOG_FMT(NETPLAY, "Adding Wii saves (server mode).");
+
+    sync_info.has_wii_save = true;
+    ++sync_info.save_count;
+
+    sync_info.configured_fs = IOS::HLE::FS::MakeFileSystem(IOS::HLE::FS::Location::Configured);
+    {
+      IOS::HLE::Kernel ios;
+      if (m_settings.savedata_sync_all_wii)
+      {
+        for (const u64 title : ios.GetESCore().GetInstalledTitles())
+        {
+          auto save = WiiSave::MakeNandStorage(sync_info.configured_fs.get(), title);
+          if (save && save->ReadHeader().has_value() && save->ReadBkHeader().has_value() &&
+              save->ReadFiles().has_value())
+          {
+            sync_info.wii_saves.emplace_back(title, std::move(save));
+          }
+          else
+          {
+            INFO_LOG_FMT(NETPLAY, "Skipping Wii save of title {:016x}.", title);
+          }
+        }
+      }
+      else
+      {
+        for (const u64 title : ios.GetESCore().GetInstalledTitles())
+        {
+          const auto tmd = ios.GetESCore().FindInstalledTMD(title);
+          if (!tmd.IsValid())
+            continue;
+          if (tmd.GetGameID() != m_selected_game_identifier.game_id)
+            continue;
+
+          auto save = WiiSave::MakeNandStorage(sync_info.configured_fs.get(), title);
+          if (save && save->ReadHeader().has_value() && save->ReadBkHeader().has_value() &&
+              save->ReadFiles().has_value())
+          {
+            sync_info.wii_saves.emplace_back(title, std::move(save));
+          }
+          else
+          {
+            INFO_LOG_FMT(NETPLAY, "Skipping Wii save of title {:016x}.", title);
+          }
+        }
+      }
+    }
+
+    {
+      auto file = sync_info.configured_fs->OpenFile(
+          IOS::PID_KERNEL, IOS::PID_KERNEL, Common::GetMiiDatabasePath(), IOS::HLE::FS::Mode::Read);
+      if (file)
+      {
+        std::vector<u8> file_data(file->GetStatus()->size);
+        if (!file->Read(file_data.data(), file_data.size()))
+          return std::nullopt;
+        sync_info.mii_data = std::move(file_data);
+      }
+    }
+  }
+#endif
 
   for (size_t i = 0; i < m_gba_config.size(); ++i)
   {
@@ -1826,9 +3203,16 @@ bool NetPlayServer::SyncSaveData(const SaveSyncInfo& sync_info)
   if (sync_info.save_count == 0)
     return true;
 
+#if IS_SERVER
+  // Server mode: compute region without GameFile
+  const DiscIO::Region game_region = Config::Get(Config::MAIN_FALLBACK_REGION);
+  const auto gamecube_region = Config::ToGameCubeRegion(game_region);
+  const std::string region = Config::GetDirectoryForRegion(gamecube_region);
+#else
   const auto game_region = sync_info.game->GetRegion();
   const auto gamecube_region = Config::ToGameCubeRegion(game_region);
   const std::string region = Config::GetDirectoryForRegion(gamecube_region);
+#endif
 
   for (ExpansionInterface::Slot slot : ExpansionInterface::MEMCARD_SLOTS)
   {
@@ -1879,7 +3263,11 @@ bool NetPlayServer::SyncSaveData(const SaveSyncInfo& sync_info)
       if (File::IsDirectory(path))
       {
         std::vector<std::string> files =
+#if IS_SERVER
+            GCMemcardDirectory::GetFileNamesForGameID(path + DIR_SEP, m_selected_game_identifier.game_id);
+#else
             GCMemcardDirectory::GetFileNamesForGameID(path + DIR_SEP, sync_info.game->GetGameID());
+#endif
 
         INFO_LOG_FMT(NETPLAY, "Sending data of GCI memcard {} in slot {} ({} files).", path,
                      is_slot_a ? 'A' : 'B', files.size());
@@ -2051,6 +3439,11 @@ bool NetPlayServer::SyncCodes()
   // Sync Codes is ticked, so set m_codes_synced to false
   m_codes_synced = false;
 
+  // Find all INI files
+#if IS_SERVER
+  const auto& game_id = m_selected_game_identifier.game_id;
+  const auto revision = m_selected_game_identifier.revision;
+#else
   // Get Game Path
   const auto game = m_dialog->FindGameFile(m_selected_game_identifier);
   if (game == nullptr)
@@ -2058,10 +3451,9 @@ bool NetPlayServer::SyncCodes()
     PanicAlertFmtT("Selected game doesn't exist in game list!");
     return false;
   }
-
-  // Find all INI files
   const auto game_id = game->GetGameID();
   const auto revision = game->GetRevision();
+#endif
   Common::IniFile globalIni;
   for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(game_id, revision))
     globalIni.Load(File::GetSysDirectory() + GAMESETTINGS_DIR DIR_SEP + filename, true);
@@ -2546,4 +3938,29 @@ void NetPlayServer::ChunkedDataAbort()
   m_chunked_data_event.Set();
   m_chunked_data_complete_event.Set();
 }
+
+// --- 实现新消息的处理函数 ---
+void NetPlayServer::OnRequestStartGameClient(Client& player)
+{
+
+  // if (m_dialog && m_dialog->IsSharingEnabled())
+  if (m_dialog)
+  {
+    // 如果是共享服务器，允许客户端启动游戏
+    RequestStartGame();
+  }
+  else
+  {
+    // 如果不是共享服务器，忽略请求或发送错误消息
+  }
+
+  // RequestStartGame();
+}
+
+void NetPlayServer::OnReady(sf::Packet& packet, Client& player)
+{
+  // MidJoin logic moved to dedicated messages (MidJoinNewUserWindowStarted, etc.)
+  // OnReady is no longer used for mid-join state transitions.
+}
+
 }  // namespace NetPlay

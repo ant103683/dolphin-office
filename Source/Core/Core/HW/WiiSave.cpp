@@ -23,6 +23,7 @@
 
 #include "Common/Align.h"
 #include "Common/CommonTypes.h"
+#include <optional>
 #include "Common/Crypto/SHA1.h"
 #include "Common/Crypto/ec.h"
 #include "Common/FileUtil.h"
@@ -63,15 +64,37 @@ class NandStorage final : public Storage
 public:
   explicit NandStorage(FS::FileSystem* fs, u64 tid) : m_fs{fs}, m_tid{tid}
   {
-    m_data_dir = Common::GetTitleDataPath(tid);
+    m_data_dir = Common::GetTitleDataPathForGame(tid);
+    // Debug logging for hash8 path resolution
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+      File::CreateFullPath(log_path);
+      File::IOFile log_file(log_path, "ab");
+      if (log_file)
+      {
+        // log_file.WriteString(
+        //     fmt::format("[NandStorage] tid={:016x}, data_dir={}\n", tid, m_data_dir));
+      }
+    }
     InitTitleUidAndGid();
     ScanForFiles(m_data_dir);
   }
 
   bool SaveExists() const override
   {
-    return !m_files_list.empty() ||
+    const bool exists = !m_files_list.empty() ||
            (m_uid && m_gid && m_fs->GetMetadata(*m_uid, *m_gid, m_data_dir + "/banner.bin"));
+    // Debug logging for SaveExists result
+    {
+      const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+      File::CreateFullPath(log_path);
+      File::IOFile log_file(log_path, "ab");
+      if (log_file)
+      {
+        // log_file.WriteString(fmt::format("[SaveExists] dir={}, result={}\n", m_data_dir, exists));
+      }
+    }
+    return exists;
   }
 
   bool EraseSave() override
@@ -164,11 +187,34 @@ public:
     if (!m_uid || !m_gid)
       return false;
 
-    for (const SaveFile& file : files)
-    {
-      const FS::Modes modes = GetFsMode(file.mode);
-      const std::string path = m_data_dir + '/' + file.path;
-      if (file.type == SaveFile::Type::File)
+    // ------------- 调试日志 -------------
+    // const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    // File::CreateFullPath(log_path);
+    // File::IOFile log_file(log_path, "ab");
+    // if (log_file)
+    // {
+      // log_file.WriteString(fmt::format("[WriteFiles] m_data_dir={}\n", m_data_dir));
+      // log_file.WriteString(fmt::format("[WriteFiles] incoming files={}\n", files.size()));
+    // }
+
+     for (const SaveFile& file : files)
+     {
+      // 再次写入每个条目信息
+      // if (log_file)
+      // {
+        // log_file.WriteString(fmt::format("  - file.path={} type={}\n", file.path,
+                                        //  file.type == SaveFile::Type::File ? "File" : "Dir"));
+      // }
+
+       const FS::Modes modes = GetFsMode(file.mode);
+       const std::string path = m_data_dir + '/' + file.path;
+
+      // if (log_file)
+      // {
+        // log_file.WriteString(fmt::format("    => dest_path={}\n", path));
+      // }
+
+       if (file.type == SaveFile::Type::File)
       {
         const auto raw_file = m_fs->CreateAndOpenFile(*m_uid, *m_gid, path, modes);
         const std::optional<std::vector<u8>>& data = *file.data;
@@ -566,7 +612,17 @@ CopyResult Import(const std::string& data_bin_path, std::function<bool()> can_ov
   return Copy(data_bin.get(), nand.get());
 }
 
-static CopyResult Export(u64 tid, std::string_view export_path, IOS::HLE::Kernel* ios)
+std::optional<u64> GetTitleIDFromDataBin(const std::string& data_bin_path)
+{
+  IOS::HLE::Kernel ios;
+  const auto storage = MakeDataBinStorage(&ios.GetIOSC(), data_bin_path, "rb");
+  const std::optional<Header> header = storage->ReadHeader();
+  if (!header)
+    return std::nullopt;
+  return static_cast<u64>(header->tid);
+}
+
+ static CopyResult Export(u64 tid, std::string_view export_path, IOS::HLE::Kernel* ios)
 {
   const std::string path = fmt::format("{}/private/wii/title/{}{}{}{}/data.bin", export_path,
                                        static_cast<char>(tid >> 24), static_cast<char>(tid >> 16),

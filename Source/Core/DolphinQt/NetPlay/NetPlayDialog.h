@@ -31,6 +31,7 @@ class QSpinBox;
 class QSplitter;
 class QTableWidget;
 class QTextEdit;
+class QTimer;
 
 class NetPlayDialog : public QDialog, public NetPlay::NetPlayUI
 {
@@ -61,6 +62,7 @@ public:
   void OnMsgStartGame() override;
   void OnMsgStopGame() override;
   void OnMsgPowerButton() override;
+  void OnResumeSimulation() override;
   void OnPlayerConnect(const std::string& player) override;
   void OnPlayerDisconnect(const std::string& player) override;
   void OnPadBufferChanged(u32 buffer) override;
@@ -109,6 +111,8 @@ private:
   void ConnectWidgets();
   void OnChat();
   void OnStart();
+  void OnWaitNewUser();
+  void OnUploadSave();
   void DisplayMessage(const QString& msg, const std::string& color,
                       int duration = OSD::Duration::NORMAL);
   void ResetExternalIP();
@@ -142,6 +146,8 @@ private:
   QMenu* m_other_menu;
   QPushButton* m_game_button;
   QPushButton* m_start_button;
+  QPushButton* m_upload_button;
+  QPushButton* m_wait_new_user_button;
   QLabel* m_buffer_label;
   QSpinBox* m_buffer_size_box;
 
@@ -164,9 +170,11 @@ private:
   QActionGroup* m_network_mode_group;
 
   QGridLayout* m_main_layout;
+  bool m_wait_new_user_active = false;
   GameDigestDialog* m_game_digest_dialog;
   ChunkedProgressDialog* m_chunked_progress_dialog;
   PadMappingDialog* m_pad_mapping;
+  QTimer* m_idle_timer;
   NetPlay::SyncIdentifier m_current_game_identifier;
   std::string m_current_game_name;
   Common::Lazy<std::string> m_external_ip_address;

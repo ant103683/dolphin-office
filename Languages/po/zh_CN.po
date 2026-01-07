@@ -1569,6 +1569,10 @@ msgstr "MemoryCard: ClearBlock 在无效地址 ({0:#x}) 中调用"
 msgid "Control Stick"
 msgstr "控制摇杆"
 
+#: ???/SelectHashDialog.cpp
+msgid "This save file corresponds to multiple versions of the game. Please select the version you want to use with this save file. Each game version number can be viewed on the emulator's main interface."
+msgstr "该存档对应的游戏存在多个版本,请选择想要使用该存档的版本,每个游戏版本号在模拟器主界面可以看到."
+
 #: Source/Core/Core/HW/GCPadEmu.cpp:55
 #: Source/Core/DolphinQt/Config/Mapping/GCPadEmu.cpp:31
 #: Source/Core/DolphinQt/TAS/GCTASInputWindow.cpp:31
@@ -1658,6 +1662,10 @@ msgstr "错误：此版本不支持模拟 GBA 控制器"
 #: Source/Core/Core/HW/Wiimote.cpp:101
 msgid "Wii Remote"
 msgstr "Wii 遥控器"
+
+#: Source/Core/Core/HW/Wiimote.cpp:101
+msgid "Custom Game Key Mapping Template:"
+msgstr "自定义游戏键位模板:"
 
 #: Source/Core/Core/HW/WiimoteEmu/Extension/Classic.cpp:50
 #: Source/Core/DolphinQt/Config/Mapping/WiimoteEmuExtension.cpp:45
@@ -4736,6 +4744,10 @@ msgstr "用户配置"
 msgid "Graphics"
 msgstr "图形"
 
+#: Source/Core/DolphinQt/ToolBar.cpp:133
+msgid "NetplayList"
+msgstr "联机大厅"
+
 #: Source/Core/DolphinQt/Config/GameConfigWidget.cpp:243
 msgid ""
 "Italics mark default game settings, bold marks user settings.\n"
@@ -7380,6 +7392,18 @@ msgstr "控制器"
 #: Source/Core/DolphinQt/ToolBar.cpp:132
 msgid "BindKey"
 msgstr "键位"
+
+#: DolphinQt/Config/PlayerSelectionDialog.cpp:35
+msgid "Select the player controller you want to configure.If you need more advanced button configuration, go to the main menu, click 'Settings', then find 'Controllers' to access the full configuration options."
+msgstr "请选择您要配置的玩家控制器,如果你需要更多功能的按键配置,请在主界面点击'设置',然后找到'控制器',获得全部设置功能。"
+
+#: DolphinQt/Config/PlayerSelectionDialog.cpp:35
+msgid "Player Controller Setup"
+msgstr "玩家键位设置"
+
+#: DolphinQt/Config/PlayerSelectionDialog.cpp:66
+msgid "Player %1"
+msgstr "玩家 %1"
 
 #: Source/Core/DolphinQt/Config/SettingsWindow.cpp:144
 msgid "Interface"
@@ -10287,9 +10311,12 @@ msgstr "游戏 ID"
 
 #: Source/Core/DolphinQt/GameList/GameList.cpp:1033
 #: Source/Core/DolphinQt/MenuBar.cpp:716
-#: Source/Core/DolphinQt/NetPlay/NetPlayBrowser.cpp:221
 msgid "Region"
 msgstr "地区"
+
+#: Source/Core/DolphinQt/NetPlay/NetPlayBrowser.cpp:221
+msgid "NO."
+msgstr "编号"
 
 #: Source/Core/DolphinQt/GameList/GameList.cpp:1034
 #: Source/Core/DolphinQt/MenuBar.cpp:717
@@ -12409,7 +12436,7 @@ msgstr "踢除玩家"
 
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:295
 msgid "Assign Controller Ports"
-msgstr "指定控制器端口"
+msgstr "分配玩家端口"
 
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:407
 msgid "Stopped game"
@@ -12761,7 +12788,7 @@ msgstr "GBA 端口 %1"
 
 #: Source/Core/DolphinQt/NetPlay/PadMappingDialog.cpp:37
 msgid "GC Port %1"
-msgstr "GC 端口 %1"
+msgstr "玩家 %1"
 
 #: Source/Core/DolphinQt/NKitWarningDialog.cpp:30
 msgid "NKit Warning"

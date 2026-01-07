@@ -121,6 +121,7 @@
     <ClCompile Include="Config\Mapping\WiimoteEmuGeneral.cpp" />
     <ClCompile Include="Config\Mapping\WiimoteEmuMotionControl.cpp" />
     <ClCompile Include="Config\Mapping\WiimoteEmuMotionControlIMU.cpp" />
+    <ClCompile Include="Config\Mapping\GCPadCustomPresetDialog.cpp" />
     <ClCompile Include="Config\NewPatchDialog.cpp" />
     <ClCompile Include="Config\PatchesWidget.cpp" />
     <ClCompile Include="Config\PlayerSelectionDialog.cpp" />
@@ -212,6 +213,7 @@
     <ClCompile Include="Resources.cpp" />
     <ClCompile Include="RiivolutionBootWidget.cpp" />
     <ClCompile Include="SearchBar.cpp" />
+    <ClCompile Include="SelectHashDialog.cpp" />
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="Settings\AdvancedPane.cpp" />
     <ClCompile Include="Settings\AudioPane.cpp" />
@@ -253,6 +255,7 @@
     <ClInclude Include="Config\Mapping\MappingNumeric.h" />
     <ClInclude Include="Config\NewPatchDialog.h" />
     <QtMoc Include="Config\PatchesWidget.h" />
+    <QtMoc Include="Config\PlayerSelectionDialog.h" />
     <ClInclude Include="Debugger\RegisterColumn.h" />
     <ClInclude Include="GBAHost.h" />
     <ClInclude Include="QtUtils\ActionHelper.h" />
@@ -346,6 +349,7 @@
     <QtMoc Include="Config\Mapping\WiimoteEmuGeneral.h" />
     <QtMoc Include="Config\Mapping\WiimoteEmuMotionControl.h" />
     <QtMoc Include="Config\Mapping\WiimoteEmuMotionControlIMU.h" />
+    <QtMoc Include="Config\Mapping\GCPadCustomPresetDialog.h" />
     <QtMoc Include="Config\PropertiesDialog.h" />
     <QtMoc Include="Config\SettingsWindow.h" />
     <QtMoc Include="Config\ToolTipControls\BalloonTip.h" />
@@ -422,6 +426,7 @@
     <QtMoc Include="RenderWidget.h" />
     <QtMoc Include="RiivolutionBootWidget.h" />
     <QtMoc Include="SearchBar.h" />
+    <QtMoc Include="SelectHashDialog.h" />
     <QtMoc Include="Settings.h" />
     <QtMoc Include="Settings\AdvancedPane.h" />
     <QtMoc Include="Settings\AudioPane.h" />

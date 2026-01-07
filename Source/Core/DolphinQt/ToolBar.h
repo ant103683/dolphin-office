@@ -33,6 +33,8 @@ signals:
   void ControllersPressed();
   void BindKeyPressed();
   void GraphicsPressed();
+  void NetplayList();
+  void GamesInfo();
 
   void StepPressed();
   void StepOverPressed();
@@ -66,4 +68,7 @@ private:
   QAction* m_skip_action;
   QAction* m_show_pc_action;
   QAction* m_set_pc_action;
+
+  QAction* m_netplay_list;
+  QAction* m_info_list;
 };

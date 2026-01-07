@@ -1,0 +1,34 @@
+{
+  "presets": [
+    {
+      "title": "电光火石3",
+      "mappings": {
+        "Buttons": ["Action", "Back", "Use Item", "Jump", "Camera", "Start"],
+        "D-Pad": ["上", "下", "左", "右"],
+        "Main Stick": ["上", "下", "左", "右", "修饰键"],
+        "C-Stick": ["上", "下", "左", "右", "修饰键"],
+        "Triggers": ["L-Analog", "R-Analog", "L", "R"]
+      }
+    },
+    {
+      "title": "电光火石4",
+      "mappings": {
+        "Buttons": ["Action", "Back", "Use Item", "Jump", "Camera", "Start"],
+        "D-Pad": ["上", "下", "左", "右"],
+        "Main Stick": ["上", "下", "左", "右", "修饰键"],
+        "C-Stick": ["上", "下", "左", "右", "修饰键"],
+        "Triggers": ["L-Analog", "R-Analog", "L", "R"]
+      }
+    },
+    {
+      "title": "电光火石5",
+      "mappings": {
+        "Buttons": ["Action", "Back", "Use Item", "Jump", "Camera", "Start"],
+        "D-Pad": ["上", "下", "左", "右"],
+        "Main Stick": ["上", "下", "左", "右", "修饰键"],
+        "C-Stick": ["上", "下", "左", "右", "修饰键"],
+        "Triggers": ["L-Analog", "R-Analog", "L", "R"]
+      }
+    }
+  ]
+}

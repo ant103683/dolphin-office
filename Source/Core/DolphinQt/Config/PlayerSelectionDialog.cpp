@@ -26,6 +26,22 @@ void PlayerSelectionDialog::CreateLayout()
 {
   m_main_layout = new QVBoxLayout(this);
 
+  // setStyleSheet(QStringLiteral("PlayerSelectionDialog {"
+  //                              "  background-image: url('d:/repo/dolphin-yihe/Data/Sys/Resources/wuFan.png');"
+  //                              "  background-repeat: no-repeat;"
+  //                              "  background-position: center;"
+  //                              "}"
+  //                              "QLabel {"
+  //                              "  background: transparent;"
+  //                              "}"
+  //                              "QPushButton {"
+  //                              "  background: rgba(255, 255, 255, 200);"
+  //                              "  border: 1px solid #ccc;"
+  //                              "  border-radius: 5px;"
+  //                              "  padding: 8px;"
+  //                              "}"));
+
+
   // Title label
   m_title_label = new QLabel(tr("Player Controller Setup"));
   m_title_label->setStyleSheet(QStringLiteral("font-weight: bold; font-size: 14px;"));
@@ -71,7 +87,7 @@ void PlayerSelectionDialog::SetupPlayerButton(int player_index)
   // Set button properties
   m_player_buttons[player_index]->setMinimumSize(120, 60);
   m_player_buttons[player_index]->setStyleSheet(QStringLiteral("QPushButton {"
-                                                               "  font-size: 14px;"
+                                                               "  font-size: 16px;"
                                                                "  font-weight: bold;"
                                                                "  border: 2px solid #3498db;"
                                                                "  border-radius: 8px;"
@@ -124,4 +140,4 @@ void PlayerSelectionDialog::OnPlayerButtonClicked()
 }
 
 
-#include "moc_PlayerSelectionDialog.cpp"
+// #include "moc_PlayerSelectionDialog.cpp"

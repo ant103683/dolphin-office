@@ -16,6 +16,7 @@
 #include <OptionParser.h>
 #include <QAbstractEventDispatcher>
 #include <QApplication>
+#include <QString>
 #include <QObject>
 #include <QPushButton>
 #include <QWidget>
@@ -43,6 +44,10 @@
 
 #include "UICommon/CommandLineParse.h"
 #include "UICommon/UICommon.h"
+
+#include "Common/FileUtil.h"
+#include "Common/CommonPaths.h"
+
 
 static bool QtMsgAlertHandler(const char* caption, const char* text, bool yes_no,
                               Common::MsgType style)
@@ -111,6 +116,61 @@ static bool QtMsgAlertHandler(const char* caption, const char* text, bool yes_no
 }
 
 #ifdef _WIN32
+static bool ExtractRarWithUnrarExe(const std::string& rar_path, const std::string& dst_dir)
+{
+  const std::string unrar_path = File::GetExeDirectory() + std::string(DIR_SEP) + "unrar.exe";
+  if (!File::Exists(unrar_path))
+    return false;
+
+  const std::string cmd = "\"" + unrar_path + "\" x -o+ -y \"" + rar_path + "\" \"" + dst_dir + "\"";
+
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  std::wstring wcmd = UTF8ToWString(cmd);
+  BOOL ok = CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+  if (!ok)
+    return false;
+  WaitForSingleObject(pi.hProcess, INFINITE);
+  DWORD exit_code = 1;
+  GetExitCodeProcess(pi.hProcess, &exit_code);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  return exit_code == 0;
+}
+#else
+static bool ExtractRarWithUnrarExe(const std::string&, const std::string&)
+{
+  return false;
+}
+#endif
+
+#ifdef _WIN32
+static bool ExtractZipWithPowershell(const std::string& zip_path, const std::string& dst_dir)
+{
+  const std::string cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"Expand-Archive -LiteralPath '" + zip_path + "' -DestinationPath '" + dst_dir + "' -Force\"";
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  std::wstring wcmd = UTF8ToWString(cmd);
+  BOOL ok = CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+  if (!ok)
+    return false;
+  WaitForSingleObject(pi.hProcess, INFINITE);
+  DWORD exit_code = 1;
+  GetExitCodeProcess(pi.hProcess, &exit_code);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  return exit_code == 0;
+}
+#else
+static bool ExtractZipWithPowershell(const std::string&, const std::string&)
+{
+  return false;
+}
+#endif
+
+#ifdef _WIN32
 #define main app_main
 #endif
 
@@ -177,8 +237,102 @@ int main(int argc, char* argv[])
 
   UICommon::SetUserDirectory(static_cast<const char*>(options.get("user")));
   UICommon::CreateDirectories();
+  {
+    const std::string wii_root = File::GetUserPath(D_WIIROOT_IDX);
+    File::CreateFullPath(wii_root);
+    const std::string wii_title_dir = wii_root + std::string("title") + std::string(DIR_SEP);
+    File::CreateFullPath(wii_title_dir);
+    const auto tree = File::ScanDirectoryTree(wii_title_dir, false);
+    const bool is_empty = tree.children.empty();
+    std::string log;
+    log += std::string("saveMove: WiiTitleDir=") + wii_title_dir + "\n";
+    log += std::string("saveMove: Empty=") + (is_empty ? "1\n" : "0\n");
+    if (is_empty)
+    {
+      const std::string exe_dir = File::GetExeDirectory();
+      const std::string zip_src = exe_dir + std::string(DIR_SEP) + "title.zip";
+      const std::string rar_src = exe_dir + std::string(DIR_SEP) + "title.rar";
+      const std::string unrar_path = exe_dir + std::string(DIR_SEP) + "unrar.exe";
+      bool copied = false;
+      bool extracted = false;
+      std::string method;
+      if (File::Exists(zip_src))
+      {
+        log += std::string("saveMove: Found title.zip\n");
+        const std::string dst_zip = wii_title_dir + "title.zip";
+        copied = File::CopyRegularFile(zip_src, dst_zip);
+        log += std::string("saveMove: CopiedZip=") + (copied ? "1\n" : "0\n");
+        if (copied)
+        {
+          method = "zip";
+          extracted = ExtractZipWithPowershell(dst_zip, wii_title_dir);
+        }
+      }
+      else if (File::Exists(rar_src))
+      {
+        log += std::string("saveMove: Found title.rar\n");
+        if (File::Exists(unrar_path))
+        {
+          const std::string dst_rar = wii_title_dir + "title.rar";
+          copied = File::CopyRegularFile(rar_src, dst_rar);
+          log += std::string("saveMove: CopiedRar=") + (copied ? "1\n" : "0\n");
+          if (copied)
+          {
+            method = "rar";
+            extracted = ExtractRarWithUnrarExe(dst_rar, wii_title_dir);
+          }
+        }
+        else
+        {
+          log += std::string("saveMove: unrar.exe not found, skipping RAR\n");
+        }
+      }
+      else
+      {
+        log += std::string("saveMove: No archive found\n");
+      }
+      if (!method.empty())
+      {
+        log += std::string("saveMove: ExtractMethod=") + method + "\n";
+        log += std::string("saveMove: Extracted=") + (extracted ? "1\n" : "0\n");
+        if (method == "rar" && !extracted)
+        {
+          log += std::string("saveMove: unrar.exe missing or failed\n");
+        }
+        if (method == "zip" && !extracted)
+        {
+          log += std::string("saveMove: Expand-Archive failed\n");
+        }
+      }
+    }
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "saveMove.txt";
+    File::CreateFullPath(log_path);
+    File::WriteStringToFile(log_path, log);
+  }
   UICommon::Init();
   Resources::Init();
+  {
+    const std::string exe_dir = File::GetExeDirectory();
+    const std::string fixed_path = exe_dir + std::string(DIR_SEP) + "dbz3_iso";
+    if (File::IsDirectory(fixed_path))
+    {
+      const auto paths = Config::GetIsoPaths();
+      const auto normalized_new = WithUnifiedPathSeparators(fixed_path);
+      bool present = false;
+      for (const auto& p : paths)
+      {
+        if (WithUnifiedPathSeparators(p) == normalized_new)
+        {
+          present = true;
+          break;
+        }
+      }
+      if (!present)
+      {
+        Settings::Instance().AddPath(QString::fromStdString(fixed_path));
+      }
+    }
+  }
   Settings::Instance().SetBatchModeEnabled(options.is_set("batch"));
 
   // Hook up alerts from core
