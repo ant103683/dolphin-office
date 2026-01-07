@@ -11,6 +11,7 @@
 #include "Common/IOFile.h"
 #include "Common/NandPaths.h"
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include "Core/System.h"
 #include "Core/Core.h"
 #include "Core/HW/WiiSave.h"

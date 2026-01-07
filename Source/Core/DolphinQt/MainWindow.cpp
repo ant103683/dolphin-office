@@ -440,12 +440,11 @@ void MainWindow::InitCoreCallbacks()
         if (!m_netplay_initial_ack_after_present_hook)
         {
           m_netplay_initial_ack_after_present_hook =
-              AfterPresentEvent::Register(
+              GetVideoEvents().after_present_event.Register(
                   [this, client](PresentInfo& info) {
                     QueueOnObject(this, [client] { client->TrySendInitialStateAck(); });
                     m_netplay_initial_ack_after_present_hook.reset();
-                  },
-                  "NetPlayInitialStateAckAfterFirstPresent");
+                  });
         }
 #endif
       }

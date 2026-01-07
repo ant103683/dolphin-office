@@ -58,6 +58,7 @@
 #include "Core/HW/GBAPad.h"
 #include "Core/NetPlayUpload.h"
 #include "Core/HW/GCMemcard/GCMemcard.h"
+#include "VideoCommon/VideoEvents.h"
 #include "Core/HW/GCPad.h"
 #include "Core/HW/SI/SI.h"
 #include "Core/HW/SI/SI_Device.h"
@@ -1071,7 +1072,7 @@ void NetPlayClient::OnStartGame(sf::Packet& packet)
     m_mid_join_after_present_count = 0;
     m_mid_join_loading_invoked = false;
     m_mid_join_first_present_ready_sent = false;
-    m_mid_join_after_present_hook = AfterPresentEvent::Register(
+    m_mid_join_after_present_hook = GetVideoEvents().after_present_event.Register(
         [this](PresentInfo& info) {
           m_mid_join_after_present_count++;
           if (!m_mid_join_first_present_ready_sent && m_mid_join_after_present_count >= 1)
@@ -1133,8 +1134,7 @@ void NetPlayClient::OnStartGame(sf::Packet& packet)
           m_mid_join_loading_invoked = true;
           m_mid_join_after_present_hook.reset();
           m_is_mid_joining = false;
-        },
-        "NetPlayMidJoinAfterFirstPresent");
+        });
   }
 #endif
 
@@ -3309,7 +3309,9 @@ void NetPlayClient::SendChunked(sf::Packet&& packet, const std::string& title)
     size_t offset = 0;
     while (offset < total_size && IsConnected())
     {
-      size_t chunk_size = std::min(CHUNKED_DATA_UNIT_SIZE, total_size - offset);
+      const size_t unit = static_cast<size_t>(CHUNKED_DATA_UNIT_SIZE);
+      const size_t remaining = static_cast<size_t>(total_size - static_cast<u64>(offset));
+      const size_t chunk_size = std::min(unit, remaining);
       sf::Packet payload_pkg;
       payload_pkg << MessageID::ChunkedDataPayload << cid;
       payload_pkg.append(static_cast<const u8*>(p.getData()) + offset, chunk_size);
