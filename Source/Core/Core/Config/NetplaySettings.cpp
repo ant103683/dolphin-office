@@ -60,4 +60,6 @@ const Info<bool> NETPLAY_HIDE_REMOTE_GBAS{{System::Main, "NetPlay", "HideRemoteG
 
 const Info<u32> NETPLAY_IDLE_TIMEOUT_SEC{{System::Main, "NetPlay", "IdleTimeoutSec"}, 900};
 
+const Info<std::string> NETPLAY_PERSPECTIVE{{System::Main, "NetPlay", "Perspective"}, "default"};
+
 }  // namespace Config

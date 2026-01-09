@@ -1010,6 +1010,25 @@ void NetPlayDialog::UpdatePerspectiveSelector()
   if (show)
   {
     PopulatePerspectiveOptions();
+    // Apply persisted default selection
+    const std::string pref = Config::Get(Config::NETPLAY_PERSPECTIVE);
+    int target_index = 0; // default
+    if (pref == "nosplit")
+    {
+      int idx = m_perspective_combo->findText(tr("不分屏"));
+      if (idx >= 0) target_index = idx;
+    }
+    else if (pref == "1p")
+    {
+      int idx = m_perspective_combo->findText(tr("1P视角"));
+      if (idx >= 0) target_index = idx;
+    }
+    else if (pref == "2p")
+    {
+      int idx = m_perspective_combo->findText(tr("2P视角"));
+      if (idx >= 0) target_index = idx;
+    }
+    m_perspective_combo->setCurrentIndex(target_index);
     UpdateSelectedPerspectiveSuffix();
   }
 }
@@ -1092,6 +1111,7 @@ void NetPlayDialog::UpdateSelectedPerspectiveSuffix()
   QString text = m_perspective_combo->itemText(idx);
   if (text == tr("不分屏"))
   {
+    Config::Set(Config::NETPLAY_PERSPECTIVE, "nosplit");
     if (slot == 1)
       NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_1P");
     else if (slot == 2)
@@ -1101,14 +1121,17 @@ void NetPlayDialog::UpdateSelectedPerspectiveSuffix()
   }
   else if (text == tr("1P视角"))
   {
+    Config::Set(Config::NETPLAY_PERSPECTIVE, "1p");
     NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_1P");
   }
   else if (text == tr("2P视角"))
   {
+    Config::Set(Config::NETPLAY_PERSPECTIVE, "2p");
     NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_2P");
   }
   else
   {
+    Config::Set(Config::NETPLAY_PERSPECTIVE, "default");
     NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("");
   }
 }
