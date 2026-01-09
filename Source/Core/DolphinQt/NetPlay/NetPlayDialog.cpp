@@ -1007,28 +1007,30 @@ void NetPlayDialog::UpdatePerspectiveSelector()
       show = true;
   }
   m_perspective_combo->setVisible(show);
-  if (show)
+  if (!show)
   {
+    m_perspective_initialized = false;
+    m_perspective_key.clear();
+    return;
+  }
+  const std::string key = game_id + ":" + hash8;
+  if (!m_perspective_initialized || m_perspective_key != key)
+  {
+    QSignalBlocker blocker(m_perspective_combo);
     PopulatePerspectiveOptions();
-    // Apply persisted default selection
     const std::string pref = Config::Get(Config::NETPLAY_PERSPECTIVE);
-    int target_index = 0; // default
-    if (pref == "nosplit")
-    {
-      int idx = m_perspective_combo->findText(tr("不分屏"));
-      if (idx >= 0) target_index = idx;
-    }
-    else if (pref == "1p")
-    {
-      int idx = m_perspective_combo->findText(tr("1P视角"));
-      if (idx >= 0) target_index = idx;
-    }
-    else if (pref == "2p")
-    {
-      int idx = m_perspective_combo->findText(tr("2P视角"));
-      if (idx >= 0) target_index = idx;
-    }
-    m_perspective_combo->setCurrentIndex(target_index);
+    int idx_default = m_perspective_combo->findText(tr("默认分屏"));
+    int idx_nosplit = m_perspective_combo->findText(tr("不分屏"));
+    int idx_1p = m_perspective_combo->findText(tr("1P视角"));
+    int idx_2p = m_perspective_combo->findText(tr("2P视角"));
+    int target = idx_default >= 0 ? idx_default : 0;
+    if (pref == "nosplit" && idx_nosplit >= 0) target = idx_nosplit;
+    else if (pref == "1p" && idx_1p >= 0) target = idx_1p;
+    else if (pref == "2p" && idx_2p >= 0) target = idx_2p;
+    m_perspective_combo->setCurrentIndex(target);
+    m_perspective_initialized = true;
+    m_perspective_key = key;
+    blocker.unblock();
     UpdateSelectedPerspectiveSuffix();
   }
 }
@@ -1044,7 +1046,6 @@ void NetPlayDialog::PopulatePerspectiveOptions()
   {
     m_perspective_combo->addItem(tr("1P视角"));
     m_perspective_combo->addItem(tr("2P视角"));
-    m_perspective_combo->setCurrentIndex(0);
     return;
   }
   const auto& gc_map = client->GetPadMapping();
@@ -1068,7 +1069,6 @@ void NetPlayDialog::PopulatePerspectiveOptions()
     m_perspective_combo->addItem(tr("1P视角"));
     m_perspective_combo->addItem(tr("2P视角"));
   }
-  m_perspective_combo->setCurrentIndex(0);
 }
 
 void NetPlayDialog::UpdateSelectedPerspectiveSuffix()
@@ -1118,21 +1118,25 @@ void NetPlayDialog::UpdateSelectedPerspectiveSuffix()
       NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_2P");
     else
       NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("");
+    if (client) { client->RecheckInitialStateAvailability(); client->TrySendInitialStateAck(); }
   }
   else if (text == tr("1P视角"))
   {
     Config::SetCurrent(Config::NETPLAY_PERSPECTIVE, "1p");
     NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_1P");
+    if (client) { client->RecheckInitialStateAvailability(); client->TrySendInitialStateAck(); }
   }
   else if (text == tr("2P视角"))
   {
     Config::SetCurrent(Config::NETPLAY_PERSPECTIVE, "2p");
     NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_2P");
+    if (client) { client->RecheckInitialStateAvailability(); client->TrySendInitialStateAck(); }
   }
   else
   {
     Config::SetCurrent(Config::NETPLAY_PERSPECTIVE, "default");
     NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("");
+    if (client) { client->RecheckInitialStateAvailability(); client->TrySendInitialStateAck(); }
   }
 }
 

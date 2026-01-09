@@ -138,6 +138,7 @@ public:
   void RequestGolfControl();
   std::string GetCurrentGolfer();
   void TrySendInitialStateAck();
+  void RecheckInitialStateAvailability();
   bool checkHasInitialStateSave();
 
   // Send and receive pads values

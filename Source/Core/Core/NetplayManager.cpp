@@ -169,9 +169,13 @@ bool NetplayManager::HasInitialStateSave(const std::string& game_id,
   using namespace Common;
   const std::string base_path = File::GetUserPath(D_STATESAVES_IDX);
   std::string suffix = m_initial_state_suffix;
-  std::string filename = game_id + "_" + hash8 + ".sav";
-  if (game_id == "RDSJAF" && hash8 == "531c9777" && !suffix.empty())
-    filename = game_id + "_" + hash8 + suffix + ".sav";
+  std::string h8 = hash8;
+  for (auto& c : h8) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  std::string gid = game_id;
+  for (auto& c : gid) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  std::string filename = gid + "_" + h8 + ".sav";
+  if (gid == "RDSJAF" && h8 == "531c9777" && !suffix.empty())
+    filename = gid + "_" + h8 + suffix + ".sav";
   const std::string full_path = base_path + "initial" + DIR_SEP + filename;
   return File::Exists(full_path);
 }
@@ -183,9 +187,13 @@ bool NetplayManager::LoadInitialState(Core::System& system, const std::string& g
   using namespace Common;
   const std::string base_path = File::GetUserPath(D_STATESAVES_IDX);
   std::string suffix = m_initial_state_suffix;
-  std::string filename = game_id + "_" + hash8 + ".sav";
-  if (game_id == "RDSJAF" && hash8 == "531c9777" && !suffix.empty())
-    filename = game_id + "_" + hash8 + suffix + ".sav";
+  std::string h8 = hash8;
+  for (auto& c : h8) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  std::string gid = game_id;
+  for (auto& c : gid) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  std::string filename = gid + "_" + h8 + ".sav";
+  if (gid == "RDSJAF" && h8 == "531c9777" && !suffix.empty())
+    filename = gid + "_" + h8 + suffix + ".sav";
   const std::string sav_path = base_path + "initial" + DIR_SEP + filename;
 
   if (!File::Exists(sav_path))

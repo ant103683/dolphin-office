@@ -421,7 +421,8 @@ void NetPlayClient::OnData(sf::Packet& packet)
 #if IS_CLIENT
       const std::string game_id = m_selected_game.game_id;
       const std::string full_hash = Common::SHA1::DigestToString(m_selected_game.sync_hash);
-      const std::string hash8 = full_hash.substr(0, 8);
+      std::string hash8 = full_hash.substr(0, 8);
+      for (auto& c : hash8) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
       
       if (NetPlay::NetplayManager::GetInstance().LoadInitialState(system, game_id, hash8))
       {
@@ -3291,6 +3292,13 @@ void NetPlayClient::TrySendInitialStateAck()
   INFO_LOG_FMT(NETPLAY, "Sent initial state acknowledgement: {}.", initial_state_available);
 }
 
+void NetPlayClient::RecheckInitialStateAvailability()
+{
+#if IS_CLIENT
+  m_has_pending_initial_state_ack = checkHasInitialStateSave();
+#endif
+}
+
 void NetPlayClient::SendChunked(sf::Packet&& packet, const std::string& title)
 {
   std::thread([this, p = std::move(packet), title]() mutable {
@@ -3380,7 +3388,8 @@ bool NetPlayClient::checkHasInitialStateSave()
 #if IS_CLIENT
   const std::string game_id = m_selected_game.game_id;
   const std::string full_hash = Common::SHA1::DigestToString(m_selected_game.sync_hash);
-  const std::string hash8 = full_hash.substr(0, 8);
+  std::string hash8 = full_hash.substr(0, 8);
+  for (auto& c : hash8) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   has_initial_state = NetPlay::NetplayManager::GetInstance().HasInitialStateSave(game_id, hash8);
 #endif
   return has_initial_state;

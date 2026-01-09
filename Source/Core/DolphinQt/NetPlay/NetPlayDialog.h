@@ -123,6 +123,8 @@ private:
   void UpdatePerspectiveSelector();
   void PopulatePerspectiveOptions();
   void UpdateSelectedPerspectiveSuffix();
+  bool m_perspective_initialized = false;
+  std::string m_perspective_key;
 
   void SendMessage(const std::string& message);
 
