@@ -308,6 +308,44 @@ int main(int argc, char* argv[])
     File::CreateFullPath(log_path);
     File::WriteStringToFile(log_path, log);
   }
+  {
+    const std::string states_root = File::GetUserPath(D_STATESAVES_IDX);
+    const std::string initial_dir = states_root + std::string("initial") + std::string(DIR_SEP);
+    File::CreateFullPath(initial_dir);
+    const std::string exe_dir = File::GetExeDirectory();
+    const std::string src_dir = exe_dir + std::string(DIR_SEP) + "dbz3_stateSaves";
+    std::string log;
+    log += std::string("[dbz3_stateSaves] initial_dir=") + initial_dir + "\n";
+    log += std::string("[dbz3_stateSaves] src_dir=") + src_dir + "\n";
+    if (File::IsDirectory(src_dir))
+    {
+      std::vector<std::string> expected{
+          "RDSJAF_531c9777.sav",
+          "RDSJAF_531c9777_1P.sav",
+          "RDSJAF_531c9777_2P.sav"};
+      for (const auto& name : expected)
+      {
+        const std::string dst = initial_dir + name;
+        const std::string src = src_dir + std::string(DIR_SEP) + name;
+        bool need_copy = !File::Exists(dst) && File::Exists(src);
+        log += std::string("[dbz3_stateSaves] ") + name + " need_copy=" + (need_copy ? "1" : "0") +
+               " src_exists=" + (File::Exists(src) ? "1" : "0") +
+               " dst_exists=" + (File::Exists(dst) ? "1" : "0") + "\n";
+        if (need_copy)
+        {
+          File::CopyRegularFile(src, dst);
+          log += std::string("[dbz3_stateSaves] copied ") + name + "\n";
+        }
+      }
+    }
+    else
+    {
+      log += std::string("[dbz3_stateSaves] src_dir missing, skip copy\n");
+    }
+    const std::string log_path = File::GetUserPath(D_LOGS_IDX) + "savehash8.txt";
+    File::CreateFullPath(log_path);
+    File::WriteStringToFile(log_path, log);
+  }
   UICommon::Init();
   Resources::Init();
   {

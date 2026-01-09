@@ -1111,7 +1111,7 @@ void NetPlayDialog::UpdateSelectedPerspectiveSuffix()
   QString text = m_perspective_combo->itemText(idx);
   if (text == tr("不分屏"))
   {
-    Config::Set(Config::NETPLAY_PERSPECTIVE, "nosplit");
+    Config::SetCurrent(Config::NETPLAY_PERSPECTIVE, "nosplit");
     if (slot == 1)
       NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_1P");
     else if (slot == 2)
@@ -1121,17 +1121,17 @@ void NetPlayDialog::UpdateSelectedPerspectiveSuffix()
   }
   else if (text == tr("1P视角"))
   {
-    Config::Set(Config::NETPLAY_PERSPECTIVE, "1p");
+    Config::SetCurrent(Config::NETPLAY_PERSPECTIVE, "1p");
     NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_1P");
   }
   else if (text == tr("2P视角"))
   {
-    Config::Set(Config::NETPLAY_PERSPECTIVE, "2p");
+    Config::SetCurrent(Config::NETPLAY_PERSPECTIVE, "2p");
     NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_2P");
   }
   else
   {
-    Config::Set(Config::NETPLAY_PERSPECTIVE, "default");
+    Config::SetCurrent(Config::NETPLAY_PERSPECTIVE, "default");
     NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("");
   }
 }
