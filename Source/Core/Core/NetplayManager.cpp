@@ -166,10 +166,13 @@ bool NetplayManager::canLoadStatus()
 bool NetplayManager::HasInitialStateSave(const std::string& game_id,
                                          const std::string& hash8) const
 {
-  // 生成完整路径: <UserPath>/StateSaves/initial/<game_id>_<hash8>.sav
   using namespace Common;
   const std::string base_path = File::GetUserPath(D_STATESAVES_IDX);
-  const std::string full_path = base_path + "initial" + DIR_SEP + game_id + "_" + hash8 + ".sav";
+  std::string suffix = m_initial_state_suffix;
+  std::string filename = game_id + "_" + hash8 + ".sav";
+  if (game_id == "RDSJAF" && hash8 == "531c9777" && !suffix.empty())
+    filename = game_id + "_" + hash8 + suffix + ".sav";
+  const std::string full_path = base_path + "initial" + DIR_SEP + filename;
   return File::Exists(full_path);
 }
 
@@ -179,12 +182,15 @@ bool NetplayManager::LoadInitialState(Core::System& system, const std::string& g
 
   using namespace Common;
   const std::string base_path = File::GetUserPath(D_STATESAVES_IDX);
-  const std::string sav_path = base_path + "initial" + DIR_SEP + game_id + "_" + hash8 + ".sav";
+  std::string suffix = m_initial_state_suffix;
+  std::string filename = game_id + "_" + hash8 + ".sav";
+  if (game_id == "RDSJAF" && hash8 == "531c9777" && !suffix.empty())
+    filename = game_id + "_" + hash8 + suffix + ".sav";
+  const std::string sav_path = base_path + "initial" + DIR_SEP + filename;
 
   if (!File::Exists(sav_path))
     return false;
 
-  // 调用核心的 State::LoadAs 执行真正的读档
   ::State::LoadAs(system, sav_path);
   return true;
 }
@@ -233,6 +239,18 @@ void NetplayManager::IdleTick(NetPlayServer& server)
       client.state = LoadStatus::INIT;
     }
   }
+}
+
+void NetplayManager::SetInitialStateVariantSuffix(const std::string& suffix)
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_initial_state_suffix = suffix;
+}
+
+std::string NetplayManager::GetInitialStateVariantSuffix() const
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  return m_initial_state_suffix;
 }
 
 }  // namespace NetPlay

@@ -81,6 +81,8 @@ public:
   // 返回值表示是否成功开始加载（文件存在且允许加载）。
   bool LoadInitialState(Core::System& system, const std::string& game_id,
                         const std::string& hash8);
+  void SetInitialStateVariantSuffix(const std::string& suffix);
+  std::string GetInitialStateVariantSuffix() const;
 
   bool getClientLoadStatus();
   void setClientLoadStatus(LoadStatus status,int pid);
@@ -114,6 +116,7 @@ private:
   };
 
   std::optional<CurrentGame> m_current_game;
+  std::string m_initial_state_suffix;
 };
 
 }  // namespace NetPlay

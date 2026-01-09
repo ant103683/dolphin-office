@@ -49,6 +49,7 @@
 #include "Core/SyncIdentifier.h"
 #include "Core/System.h"
 #include "Core/netplayManager.h"
+#include "Common/Crypto/SHA1.h"
 
 #include "DolphinQt/NetPlay/ChunkedProgressDialog.h"
 #include "DolphinQt/NetPlay/ClickBlurLabel.h"
@@ -150,6 +151,9 @@ void NetPlayDialog::CreateMainLayout()
   m_quit_button = new QPushButton(tr("Quit"));
   m_splitter = new QSplitter(Qt::Horizontal);
   m_menu_bar = new QMenuBar(this);
+  m_perspective_combo = new QComboBox;
+  int base_w = m_perspective_combo->sizeHint().width();
+  m_perspective_combo->setFixedWidth(static_cast<int>(base_w * 1.2));
 
   m_data_menu = m_menu_bar->addMenu(tr("Data"));
   m_data_menu->setToolTipsVisible(true);
@@ -269,10 +273,11 @@ void NetPlayDialog::CreateMainLayout()
   options_widget->addWidget(m_start_button, 0, 0, Qt::AlignVCenter);
   options_widget->addWidget(m_upload_button, 0, 1, Qt::AlignVCenter);
   options_widget->addWidget(m_wait_new_user_button, 0, 2, Qt::AlignVCenter);
-  options_widget->addWidget(m_buffer_label, 0, 3, Qt::AlignVCenter);
-  options_widget->addWidget(m_buffer_size_box, 0, 4, Qt::AlignVCenter);
-  options_widget->addWidget(m_quit_button, 0, 5, Qt::AlignVCenter | Qt::AlignRight);
-  options_widget->setColumnStretch(5, 1000);
+  options_widget->addWidget(m_perspective_combo, 0, 3, Qt::AlignVCenter);
+  options_widget->addWidget(m_buffer_label, 0, 4, Qt::AlignVCenter);
+  options_widget->addWidget(m_buffer_size_box, 0, 5, Qt::AlignVCenter);
+  options_widget->addWidget(m_quit_button, 0, 6, Qt::AlignVCenter | Qt::AlignRight);
+  options_widget->setColumnStretch(6, 1000);
 
   m_main_layout->addLayout(options_widget, 2, 0, 1, -1, Qt::AlignRight);
   m_main_layout->setRowStretch(1, 1000);
@@ -459,6 +464,7 @@ void NetPlayDialog::ConnectWidgets()
   connect(m_upload_button, &QPushButton::clicked, this, &NetPlayDialog::OnUploadSave);
   connect(m_wait_new_user_button, &QPushButton::clicked, this, &NetPlayDialog::OnWaitNewUser);
   connect(m_quit_button, &QPushButton::clicked, this, &NetPlayDialog::reject);
+  connect(m_perspective_combo, &QComboBox::currentIndexChanged, this, &NetPlayDialog::UpdateSelectedPerspectiveSuffix);
 
   connect(m_game_button, &QPushButton::clicked, [this] {
     GameListDialog gld(m_game_list_model, this);
@@ -795,6 +801,8 @@ void NetPlayDialog::UpdateGUI()
   if (!client)
     return;
 
+  UpdatePerspectiveSelector();
+
   bool game_selected = !m_current_game_name.empty();  // 假设 GetGameID() 返回 std::string
   bool game_running = Core::GetState(Core::System::GetInstance()) != Core::State::Uninitialized;
 
@@ -978,6 +986,133 @@ void NetPlayDialog::OnUploadSave()
   DisplayMessage(tr("发送请求:上传存档..."), "blue");
 }
 
+void NetPlayDialog::UpdatePerspectiveSelector()
+{
+#if IS_SERVER
+  if (m_perspective_combo)
+    m_perspective_combo->setVisible(false);
+  return;
+#endif
+  if (!m_perspective_combo)
+    return;
+  const std::string game_id = m_current_game_identifier.game_id;
+  std::string hash_hex = Common::SHA1::DigestToString(m_current_game_identifier.sync_hash);
+  std::string hash8 = hash_hex.size() >= 8 ? hash_hex.substr(0, 8) : std::string();
+  for (auto& c : hash8) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  bool show = (game_id == "RDSJAF" && hash8 == "531c9777");
+  if (!show)
+  {
+    const std::string& name = m_current_game_name;
+    if (!name.empty() && name.find("531c9777") != std::string::npos && game_id == "RDSJAF")
+      show = true;
+  }
+  m_perspective_combo->setVisible(show);
+  if (show)
+  {
+    PopulatePerspectiveOptions();
+    UpdateSelectedPerspectiveSuffix();
+  }
+}
+
+void NetPlayDialog::PopulatePerspectiveOptions()
+{
+  if (!m_perspective_combo)
+    return;
+  m_perspective_combo->clear();
+  m_perspective_combo->addItem(tr("默认分屏"));
+  auto client = Settings::Instance().GetNetPlayClient();
+  if (!client)
+  {
+    m_perspective_combo->addItem(tr("1P视角"));
+    m_perspective_combo->addItem(tr("2P视角"));
+    m_perspective_combo->setCurrentIndex(0);
+    return;
+  }
+  const auto& gc_map = client->GetPadMapping();
+  const auto& wii_map = client->GetWiimoteMapping();
+  const auto local_pid = client->GetLocalPlayerId();
+  int slot = -1;
+  for (int i = 0; i < 4; ++i)
+  {
+    if (gc_map[i] == local_pid || wii_map[i] == local_pid)
+    {
+      slot = i + 1;
+      break;
+    }
+  }
+  if (slot == 1 || slot == 2)
+  {
+    m_perspective_combo->addItem(tr("不分屏"));
+  }
+  else
+  {
+    m_perspective_combo->addItem(tr("1P视角"));
+    m_perspective_combo->addItem(tr("2P视角"));
+  }
+  m_perspective_combo->setCurrentIndex(0);
+}
+
+void NetPlayDialog::UpdateSelectedPerspectiveSuffix()
+{
+  if (!m_perspective_combo)
+    return;
+  const std::string game_id = m_current_game_identifier.game_id;
+  std::string hash_hex = Common::SHA1::DigestToString(m_current_game_identifier.sync_hash);
+  std::string hash8 = hash_hex.size() >= 8 ? hash_hex.substr(0, 8) : std::string();
+  for (auto& c : hash8) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  if (!(game_id == "RDSJAF" && hash8 == "531c9777"))
+  {
+    NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("");
+    return;
+  }
+  auto client = Settings::Instance().GetNetPlayClient();
+  int idx = m_perspective_combo->currentIndex();
+  if (!client)
+  {
+    if (idx == 1)
+      NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_1P");
+    else if (idx == 2)
+      NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_2P");
+    else
+      NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("");
+    return;
+  }
+  const auto& gc_map = client->GetPadMapping();
+  const auto& wii_map = client->GetWiimoteMapping();
+  const auto local_pid = client->GetLocalPlayerId();
+  int slot = -1;
+  for (int i = 0; i < 4; ++i)
+  {
+    if (gc_map[i] == local_pid || wii_map[i] == local_pid)
+    {
+      slot = i + 1;
+      break;
+    }
+  }
+  QString text = m_perspective_combo->itemText(idx);
+  if (text == tr("不分屏"))
+  {
+    if (slot == 1)
+      NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_1P");
+    else if (slot == 2)
+      NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_2P");
+    else
+      NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("");
+  }
+  else if (text == tr("1P视角"))
+  {
+    NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_1P");
+  }
+  else if (text == tr("2P视角"))
+  {
+    NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("_2P");
+  }
+  else
+  {
+    NetPlay::NetplayManager::GetInstance().SetInitialStateVariantSuffix("");
+  }
+}
+
 // NetPlayUI methods
 
 void NetPlayDialog::BootGame(const std::string& filename,
@@ -1039,6 +1174,7 @@ void NetPlayDialog::OnMsgChangeGame(const NetPlay::SyncIdentifier& sync_identifi
     m_current_game_identifier = sync_identifier;
     m_current_game_name = netplay_name;
     UpdateDiscordPresence();
+    UpdateGUI();
   });
   DisplayMessage(tr("Game changed to \"%1\"").arg(qname), "magenta");
 }

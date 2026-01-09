@@ -120,6 +120,9 @@ private:
   void UpdateGUI();
   void GameStatusChanged(bool running);
   void SetOptionsEnabled(bool enabled);
+  void UpdatePerspectiveSelector();
+  void PopulatePerspectiveOptions();
+  void UpdateSelectedPerspectiveSuffix();
 
   void SendMessage(const std::string& message);
 
@@ -150,6 +153,7 @@ private:
   QPushButton* m_wait_new_user_button;
   QLabel* m_buffer_label;
   QSpinBox* m_buffer_size_box;
+  QComboBox* m_perspective_combo;
 
   QActionGroup* m_savedata_style_group;
   QAction* m_savedata_none_action;
